@@ -20,7 +20,7 @@ from sdks.novavision.src.media.image import Image
 from sdks.novavision.src.base.component import Component
 from sdks.novavision.src.helper.executor import Executor
 from components.CameraFocus.src.utils.response import build_tenengrad_response
-from components.CameraFocus.src.models.CameraFocusModel import CameraFocusModel
+from components.CameraFocus.src.models.PackageModel import PackageModel
 from components.CameraFocus.src.classes.FocusMeasures import FocusMeasures
 from components.CameraFocus.src.classes import OverlayRenderer
 
@@ -28,7 +28,7 @@ from components.CameraFocus.src.classes import OverlayRenderer
 class CameraFocusTenengrad(Component):
     def __init__(self, request, bootstrap):
         super().__init__(request, bootstrap)
-        self.request.model = CameraFocusModel(**(self.request.data))
+        self.request.model = PackageModel(**(self.request.data))
 
         self.image = self.request.get_param("inputImage")
         self.detections = self.request.get_param("inputDetections")

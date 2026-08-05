@@ -3,7 +3,7 @@ Local test client for the CameraFocus package.
 
 Runs either executor (Brenner or Tenengrad) against a single image file, without
 the NovaVision platform or Redis. It builds a schema-valid request payload from
-CameraFocusModel, then executes the real executor code with a small mock layer
+PackageModel, then executes the real executor code with a small mock layer
 standing in for the SDK's Redis-backed Image I/O.
 
 Usage:
@@ -16,7 +16,7 @@ Notes:
   installed SDK to follow, so this implements the behaviour described in the
   step. Swap it out if the team means a platform-specific client.
 - The seven Tenengrad parameters are exposed as CLI flags whose defaults are
-  read from the CameraFocusModel schema (falling back to the documented values).
+  read from the PackageModel schema (falling back to the documented values).
 - If the real SDK is importable it is used; otherwise Redis-free mocks are
   installed. The Image.get_frame / Image.set_frame frame I/O is always mocked so
   no Redis is required.
@@ -216,7 +216,7 @@ def setup_environment():
 # ---------------------------------------------------------------------------
 def schema_defaults():
     try:
-        from components.CameraFocus.src.models.CameraFocusModel import (
+        from components.CameraFocus.src.models.PackageModel import (
             UnderExposedThreshold, OverExposedThreshold, ShowZebraWarnings,
             ShowFocusPeaking, ShowHUD, ShowCenterMarker, GridOverlay,
         )
@@ -234,7 +234,7 @@ def schema_defaults():
 
 
 # ---------------------------------------------------------------------------
-# Payload construction (shape validated against CameraFocusModel)
+# Payload construction (shape validated against PackageModel)
 # ---------------------------------------------------------------------------
 def _bool_option(flag):
     return {"name": "True", "value": True} if flag else {"name": "False", "value": False}
@@ -279,11 +279,11 @@ def build_payload(task, opts, detections_payload):
 def validate_payload(payload):
     """Best-effort: confirm the payload is accepted by the real schema."""
     try:
-        from components.CameraFocus.src.models.CameraFocusModel import CameraFocusModel
-        CameraFocusModel(**payload)
+        from components.CameraFocus.src.models.PackageModel import PackageModel
+        PackageModel(**payload)
         return True
     except Exception as exc:  # pragma: no cover - diagnostic only
-        print("  ! payload did not validate against CameraFocusModel: {}".format(exc))
+        print("  ! payload did not validate against PackageModel: {}".format(exc))
         return False
 
 

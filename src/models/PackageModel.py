@@ -405,7 +405,7 @@ class PackageConfigs(Configs):
     executor: ConfigExecutor
 
 
-class CameraFocusModel(Package):
+class PackageModel(Package):
     configs: PackageConfigs
     type: Literal["component"] = "component"
     name: Literal["CameraFocus"] = "CameraFocus"

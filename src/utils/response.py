@@ -1,7 +1,7 @@
 
 from sdks.novavision.src.helper.package import PackageHelper
-from components.CameraFocus.src.models.CameraFocusModel import (
-    CameraFocusModel, PackageConfigs, ConfigExecutor,
+from components.CameraFocus.src.models.PackageModel import (
+    PackageModel, PackageConfigs, ConfigExecutor,
     CameraFocusBrenner, CameraFocusBrennerResponse, CameraFocusBrennerOutputs,
     CameraFocusTenengrad, CameraFocusTenengradResponse, CameraFocusTenengradOutputs,
     OutputImage, OutputFocusMeasure, OutputBboxFocusMeasures,
@@ -19,7 +19,7 @@ def build_brenner_response(context):
     brennerExecutor = CameraFocusBrenner(value=brennerResponse)
     configExecutor = ConfigExecutor(value=brennerExecutor)
     packageConfigs = PackageConfigs(executor=configExecutor)
-    package = PackageHelper(packageModel=CameraFocusModel, packageConfigs=packageConfigs)
+    package = PackageHelper(packageModel=PackageModel, packageConfigs=packageConfigs)
     packageModel = package.build_model(context)
     return packageModel
 
@@ -37,6 +37,6 @@ def build_tenengrad_response(context):
     tenengradExecutor = CameraFocusTenengrad(value=tenengradResponse)
     configExecutor = ConfigExecutor(value=tenengradExecutor)
     packageConfigs = PackageConfigs(executor=configExecutor)
-    package = PackageHelper(packageModel=CameraFocusModel, packageConfigs=packageConfigs)
+    package = PackageHelper(packageModel=PackageModel, packageConfigs=packageConfigs)
     packageModel = package.build_model(context)
     return packageModel

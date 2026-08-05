@@ -20,7 +20,7 @@ from sdks.novavision.src.media.image import Image
 from sdks.novavision.src.base.component import Component
 from sdks.novavision.src.helper.executor import Executor
 from components.CameraFocus.src.utils.response import build_brenner_response
-from components.CameraFocus.src.models.CameraFocusModel import CameraFocusModel
+from components.CameraFocus.src.models.PackageModel import PackageModel
 from components.CameraFocus.src.classes.InputGate import InputGate
 from components.CameraFocus.src.classes.FocusMeasures import FocusMeasures
 from components.CameraFocus.src.classes.Visualization import Visualization
@@ -29,7 +29,7 @@ from components.CameraFocus.src.classes.Visualization import Visualization
 class CameraFocusBrenner(Component):
     def __init__(self, request, bootstrap):
         super().__init__(request, bootstrap)
-        self.request.model = CameraFocusModel(**(self.request.data))
+        self.request.model = PackageModel(**(self.request.data))
         self.image = self.request.get_param("inputImage")
         self.focus_measure = 0.0
 
