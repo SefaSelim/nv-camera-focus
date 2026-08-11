@@ -151,9 +151,20 @@ class CameraFocusStream(Component):
     def _apply_control(self, camera):
         if self.focus_mode == "Manual":
             if self.trigger_af:
-                camera.trigger_autofocus()
+                # Fire autofocus once, not every frame.
+                if not self.bootstrap.get("manual_af_done"):
+                    camera.trigger_autofocus()
+                    self.bootstrap["manual_af_done"] = True
             else:
-                camera.set_focus_zoom(self.focus_value, self.zoom_value)
+                # Send the absolute focus/zoom ONCE per target. Re-issuing
+                # adjustFocus every frame restarts the (slow) lens motor and
+                # re-triggers autofocus, so it never settles. Only command when
+                # the target changes.
+                target = (round(float(self.focus_value), 4), round(float(self.zoom_value), 4))
+                if self.bootstrap.get("last_manual_target") != target:
+                    camera.set_focus_zoom(self.focus_value, self.zoom_value)
+                    self.bootstrap["last_manual_target"] = target
+                    self.bootstrap["manual_af_done"] = False
         elif self.focus_mode == "OnePushAutofocus":
             if not self.bootstrap.get("one_push_done"):
                 camera.trigger_autofocus()
