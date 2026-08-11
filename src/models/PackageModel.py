@@ -381,16 +381,333 @@ class CameraFocusTenengrad(Config):
 
 
 # ---------------------------------------------------------------------------
-# Task selector (two executors -> NO target, the user picks)
+# Executor C: CameraFocusStream (self-contained Dahua camera source + control)
+# ---------------------------------------------------------------------------
+
+# --- camera status output ---
+class OutputCameraStatus(Output):
+    name: Literal["outputCameraStatus"] = "outputCameraStatus"
+    value: Union[dict, list]
+    type: str = "object"
+
+    class Config:
+        title = "Camera Status"
+
+
+# --- stream subtype options ---
+class SubtypeMain(Config):
+    name: Literal["main"] = "main"
+    value: Literal[0] = 0
+    type: Literal["number"] = "number"
+    field: Literal["option"] = "option"
+
+    class Config:
+        title = "Main Stream"
+
+
+class SubtypeSub(Config):
+    name: Literal["sub"] = "sub"
+    value: Literal[1] = 1
+    type: Literal["number"] = "number"
+    field: Literal["option"] = "option"
+
+    class Config:
+        title = "Sub Stream"
+
+
+# --- focus-mode options ---
+class FocusModeManual(Config):
+    name: Literal["manual"] = "manual"
+    value: Literal["Manual"] = "Manual"
+    type: Literal["string"] = "string"
+    field: Literal["option"] = "option"
+
+    class Config:
+        title = "Manual"
+
+
+class FocusModeOnePush(Config):
+    name: Literal["onePushAutofocus"] = "onePushAutofocus"
+    value: Literal["OnePushAutofocus"] = "OnePushAutofocus"
+    type: Literal["string"] = "string"
+    field: Literal["option"] = "option"
+
+    class Config:
+        title = "One-Push Autofocus"
+
+
+class FocusModeClosedLoop(Config):
+    name: Literal["closedLoop"] = "closedLoop"
+    value: Literal["ClosedLoop"] = "ClosedLoop"
+    type: Literal["string"] = "string"
+    field: Literal["option"] = "option"
+
+    class Config:
+        title = "Closed-Loop Autofocus"
+
+
+# --- camera connection configs ---
+class CameraIp(Config):
+    """
+        IPv4 address of the Dahua camera. The executor connects to this address
+        over RTSP (video) and HTTP CGI (focus/zoom control).
+    """
+    name: Literal["CameraIp"] = "CameraIp"
+    value: str = ""
+    type: Literal["string"] = "string"
+    field: Literal["textInput"] = "textInput"
+
+    class Config:
+        title = "Camera IP"
+        json_schema_extra = {"shortDescription": "Camera IP address"}
+
+
+class CameraUsername(Config):
+    """
+        Username for the camera's HTTP/RTSP authentication (usually 'admin').
+    """
+    name: Literal["CameraUsername"] = "CameraUsername"
+    value: str = "admin"
+    type: Literal["string"] = "string"
+    field: Literal["textInput"] = "textInput"
+
+    class Config:
+        title = "Camera Username"
+        json_schema_extra = {"shortDescription": "Camera username"}
+
+
+class CameraPassword(Config):
+    """
+        Password for the camera. Handled as a secret (hidden field); it is never
+        logged or echoed by the executor.
+    """
+    name: Literal["CameraPassword"] = "CameraPassword"
+    value: str = ""
+    type: Literal["string"] = "string"
+    field: Literal["hiddenInput"] = "hiddenInput"
+
+    class Config:
+        title = "Camera Password"
+        json_schema_extra = {"shortDescription": "Camera password (secret)"}
+
+
+class CameraHttpPort(Config):
+    """
+        HTTP port used for the Dahua CGI control API. Default 80.
+    """
+    name: Literal["CameraHttpPort"] = "CameraHttpPort"
+    value: int = Field(ge=1, le=65535, default=80)
+    type: Literal["number"] = "number"
+    field: Literal["textInput"] = "textInput"
+
+    class Config:
+        title = "Camera HTTP Port"
+        json_schema_extra = {"shortDescription": "HTTP/CGI port"}
+
+
+class CameraRtspPort(Config):
+    """
+        RTSP port used to pull the camera video stream. Default 554.
+    """
+    name: Literal["CameraRtspPort"] = "CameraRtspPort"
+    value: int = Field(ge=1, le=65535, default=554)
+    type: Literal["number"] = "number"
+    field: Literal["textInput"] = "textInput"
+
+    class Config:
+        title = "Camera RTSP Port"
+        json_schema_extra = {"shortDescription": "RTSP port"}
+
+
+class CameraChannel(Config):
+    """
+        Camera channel index for the RTSP URL and the PTZ CGI calls. Default 1.
+    """
+    name: Literal["CameraChannel"] = "CameraChannel"
+    value: int = Field(ge=1, le=64, default=1)
+    type: Literal["number"] = "number"
+    field: Literal["textInput"] = "textInput"
+
+    class Config:
+        title = "Camera Channel"
+        json_schema_extra = {"shortDescription": "Channel index"}
+
+
+class StreamSubtype(Config):
+    """
+        Which RTSP stream to pull: Main is higher resolution, Sub is lighter and
+        faster. Changing this affects only the pulled frame, not the control.
+    """
+    name: Literal["StreamSubtype"] = "StreamSubtype"
+    value: Union[SubtypeMain, SubtypeSub] = Field(default_factory=SubtypeMain)
+    type: Literal["object"] = "object"
+    field: Literal["dropdownlist"] = "dropdownlist"
+
+    class Config:
+        title = "Stream Subtype"
+        json_schema_extra = {"shortDescription": "Main / Sub stream"}
+
+
+# --- control configs ---
+class FocusMode(Config):
+    """
+        How the camera focus is driven. Manual writes FocusValue/ZoomValue (or,
+        if TriggerAutofocus is enabled, fires a one-push autofocus).
+        OnePushAutofocus fires the camera's own autofocus once. ClosedLoop
+        continuously hill-climbs the Tenengrad focus measure. For Manual and
+        ClosedLoop the camera's continuous autofocus tracking is disabled so our
+        commands are not overridden.
+    """
+    name: Literal["FocusMode"] = "FocusMode"
+    value: Union[FocusModeManual, FocusModeOnePush, FocusModeClosedLoop] = Field(
+        default_factory=FocusModeManual)
+    type: Literal["object"] = "object"
+    field: Literal["dropdownlist"] = "dropdownlist"
+
+    class Config:
+        title = "Focus Mode"
+        json_schema_extra = {"shortDescription": "Focus control mode"}
+
+
+class FocusValue(Config):
+    """
+        Target absolute focus position (0.0-1.0) written to the camera in Manual
+        mode. 0.0 is one extreme of the lens travel, 1.0 the other.
+    """
+    name: Literal["FocusValue"] = "FocusValue"
+    value: float = Field(ge=0.0, le=1.0, default=0.5)
+    type: Literal["number"] = "number"
+    field: Literal["textInput"] = "textInput"
+    placeHolder: Literal["[0.0, 1.0]"] = "[0.0, 1.0]"
+
+    class Config:
+        title = "Focus Value"
+        json_schema_extra = {"shortDescription": "Manual focus (0-1)"}
+
+
+class ZoomValue(Config):
+    """
+        Target absolute zoom position (0.0-1.0) written to the camera in Manual
+        mode. 0.0 is fully wide, 1.0 fully tele.
+    """
+    name: Literal["ZoomValue"] = "ZoomValue"
+    value: float = Field(ge=0.0, le=1.0, default=0.0)
+    type: Literal["number"] = "number"
+    field: Literal["textInput"] = "textInput"
+    placeHolder: Literal["[0.0, 1.0]"] = "[0.0, 1.0]"
+
+    class Config:
+        title = "Zoom Value"
+        json_schema_extra = {"shortDescription": "Manual zoom (0-1)"}
+
+
+class FocusSearchStep(Config):
+    """
+        Step size (0.0-1.0) used by the closed-loop autofocus hill-climb. Larger
+        steps converge faster but overshoot; smaller steps are more precise.
+    """
+    name: Literal["FocusSearchStep"] = "FocusSearchStep"
+    value: float = Field(ge=0.0, le=1.0, default=0.02)
+    type: Literal["number"] = "number"
+    field: Literal["textInput"] = "textInput"
+    placeHolder: Literal["[0.0, 1.0]"] = "[0.0, 1.0]"
+
+    class Config:
+        title = "Focus Search Step"
+        json_schema_extra = {"shortDescription": "Closed-loop step size"}
+
+
+class TriggerAutofocus(Config):
+    """
+        In Manual mode, when Enabled, fire a one-push autofocus on this run
+        instead of writing FocusValue/ZoomValue. Ignored in the other modes.
+    """
+    name: Literal["TriggerAutofocus"] = "TriggerAutofocus"
+    value: Union[OptionEnable, OptionDisable] = Field(default_factory=OptionDisable)
+    type: Literal["object"] = "object"
+    field: Literal["dropdownlist"] = "dropdownlist"
+
+    class Config:
+        title = "Trigger Autofocus"
+        json_schema_extra = {"shortDescription": "Fire one-push AF (Manual)"}
+
+
+# --- executor C aggregation ---
+class CameraFocusStreamInputs(Inputs):
+    inputDetections: Optional[InputDetections]
+
+
+class CameraFocusStreamConfigs(Configs):
+    cameraIp: CameraIp
+    cameraUsername: CameraUsername
+    cameraPassword: CameraPassword
+    cameraHttpPort: CameraHttpPort
+    cameraRtspPort: CameraRtspPort
+    cameraChannel: CameraChannel
+    streamSubtype: StreamSubtype
+    focusMode: FocusMode
+    focusValue: FocusValue
+    zoomValue: ZoomValue
+    focusSearchStep: FocusSearchStep
+    triggerAutofocus: TriggerAutofocus
+    underExposedThreshold: UnderExposedThreshold
+    overExposedThreshold: OverExposedThreshold
+    showZebraWarnings: ShowZebraWarnings
+    showFocusPeaking: ShowFocusPeaking
+    showHUD: ShowHUD
+    showCenterMarker: ShowCenterMarker
+    gridOverlay: GridOverlay
+
+
+class CameraFocusStreamOutputs(Outputs):
+    outputImage: OutputImage
+    outputFocusMeasure: OutputFocusMeasure
+    outputBboxFocusMeasures: OutputBboxFocusMeasures
+    outputCameraStatus: OutputCameraStatus
+
+
+class CameraFocusStreamRequest(Request):
+    inputs: Optional[CameraFocusStreamInputs]
+    configs: CameraFocusStreamConfigs
+
+    class Config:
+        json_schema_extra = {
+            "target": "configs"
+        }
+
+
+class CameraFocusStreamResponse(Response):
+    outputs: CameraFocusStreamOutputs
+
+
+class CameraFocusStream(Config):
+    name: Literal["CameraFocusStream"] = "CameraFocusStream"
+    value: Union[CameraFocusStreamRequest, CameraFocusStreamResponse]
+    type: Literal["object"] = "object"
+    field: Literal["option"] = "option"
+
+    class Config:
+        title = "Camera Focus Stream"
+        json_schema_extra = {
+            "target": {
+                "value": 0
+            }
+        }
+
+
+# ---------------------------------------------------------------------------
+# Task selector (three executors -> NO target, the user picks)
 # ---------------------------------------------------------------------------
 class ConfigExecutor(Config):
     """
-        Select which focus-measurement task to run. Brenner is a fast,
-        parameter-free sharpness check; Tenengrad is the full-featured measure
-        with exposure/focus overlays and optional per-detection scores.
+        Select which task to run. Brenner is a fast, parameter-free sharpness
+        check on an input image; Tenengrad is the full-featured measure with
+        exposure/focus overlays and optional per-detection scores on an input
+        image; CameraFocusStream connects directly to a Dahua camera (RTSP +
+        CGI), measures focus, and controls the camera's focus/zoom.
     """
     name: Literal["ConfigExecutor"] = "ConfigExecutor"
-    value: Union[CameraFocusBrenner, CameraFocusTenengrad]
+    value: Union[CameraFocusBrenner, CameraFocusTenengrad, CameraFocusStream]
     type: Literal["executor"] = "executor"
     field: Literal["dependentDropdownlist"] = "dependentDropdownlist"
 
