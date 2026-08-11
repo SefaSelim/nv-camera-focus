@@ -478,17 +478,20 @@ class CameraUsername(Config):
 
 class CameraPassword(Config):
     """
-        Password for the camera. Handled as a secret (hidden field); it is never
-        logged or echoed by the executor.
+        Password for the camera's HTTP/RTSP authentication. Entered in the node
+        config. The executor never logs it (only its length in diagnostics).
+        Note: this is a plain textInput because it must be user-editable; the
+        hiddenInput field type is not shown in the form, so it cannot be used
+        for a value the user needs to type.
     """
     name: Literal["CameraPassword"] = "CameraPassword"
     value: str = ""
     type: Literal["string"] = "string"
-    field: Literal["hiddenInput"] = "hiddenInput"
+    field: Literal["textInput"] = "textInput"
 
     class Config:
         title = "Camera Password"
-        json_schema_extra = {"shortDescription": "Camera password (secret)"}
+        json_schema_extra = {"shortDescription": "Camera password"}
 
 
 class CameraHttpPort(Config):
