@@ -16,6 +16,7 @@ without touching the executors. Credentials are passed in at construction time
 and are NEVER logged.
 """
 
+import os
 import time
 
 import cv2
@@ -167,6 +168,8 @@ class CameraController:
     # ---------------------------------------------------------------- RTSP
     def open_stream(self):
         """Open the RTSP stream. Returns True if opened."""
+        # Prefer TCP transport and a low buffer to keep latency down.
+        os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
         capture = cv2.VideoCapture(self.rtsp_url(), cv2.CAP_FFMPEG)
         try:
             capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)

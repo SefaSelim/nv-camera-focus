@@ -232,8 +232,14 @@ class CameraFocusStream(Component):
 
             self._apply_control(camera)
 
-            status = camera.get_focus_status()
-            self.camera_status = {k: v for k, v in status.items() if k != "raw"}
+            # Reading lens status is a blocking HTTP call; doing it every frame
+            # adds latency and makes the preview lag. Poll it ~once per second
+            # and reuse the cached value in between.
+            self.bootstrap["frame_count"] = self.bootstrap.get("frame_count", 0) + 1
+            if self.bootstrap["frame_count"] % 15 == 1:
+                status = camera.get_focus_status()
+                self.bootstrap["last_status"] = {k: v for k, v in status.items() if k != "raw"}
+            self.camera_status = self.bootstrap.get("last_status", {})
 
             self._publish(rendered)
             _debug_log("published outputImage type={} focus_measure={:.1f}".format(
