@@ -15,10 +15,18 @@ AutofocusController. Credentials are read from the request and never logged.
 
 The persistent camera connection and the autofocus search state live in the
 bootstrap dict, so they survive across frames.
+
+NOTE: a lightweight diagnostic logger is enabled (writes to a log file and
+stderr; the camera password is never logged). It is meant for bring-up on the
+platform and can be removed once the flow is confirmed.
 """
 
+import json
 import os
 import sys
+import tempfile
+import time
+import traceback
 
 import numpy as np
 
@@ -36,10 +44,42 @@ from components.CameraFocus.src.classes.AutofocusController import AutofocusCont
 from components.CameraFocus.src.classes import OverlayRenderer
 
 
+def _debug_log(message):
+    """Append a timestamped diagnostic line to a log file and stderr. Never
+    raises; never logs the camera password."""
+    line = "[{}] CameraFocusStream: {}".format(
+        time.strftime("%Y-%m-%d %H:%M:%S"), message)
+    try:
+        path = os.environ.get("CAMERAFOCUS_LOG") or os.path.join(
+            tempfile.gettempdir(), "camerafocus_debug.log")
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except Exception:
+        pass
+    try:
+        sys.stderr.write(line + "\n")
+        sys.stderr.flush()
+    except Exception:
+        pass
+
+
 class CameraFocusStream(Component):
     def __init__(self, request, bootstrap):
         super().__init__(request, bootstrap)
-        self.request.model = PackageModel(**(self.request.data))
+
+        # Diagnostic: did unresolved template placeholders reach the executor?
+        try:
+            raw = json.dumps(self.request.data)
+            _debug_log("request contains '{{changeable}}' placeholder: {}".format(
+                "{{changeable}}" in raw))
+        except Exception:
+            pass
+
+        try:
+            self.request.model = PackageModel(**(self.request.data))
+        except Exception as exc:
+            _debug_log("PackageModel build FAILED: {}\n{}".format(exc, traceback.format_exc()))
+            raise
 
         self.detections = self.request.get_param("inputDetections")
 
@@ -58,6 +98,13 @@ class CameraFocusStream(Component):
         self.zoom_value = self.request.get_param("ZoomValue")
         self.focus_step = self.request.get_param("FocusSearchStep")
         self.trigger_af = self.request.get_param("TriggerAutofocus")
+
+        _debug_log(
+            "params: ip={!r} http={!r} rtsp={!r} ch={!r} sub={!r} mode={!r} "
+            "focus={!r} zoom={!r} pass_len={}".format(
+                self.camera_ip, self.http_port, self.rtsp_port, self.channel,
+                self.subtype, self.focus_mode, self.focus_value, self.zoom_value,
+                len(self.camera_pass or "") if isinstance(self.camera_pass, str) else "n/a"))
 
         # overlays (reused Tenengrad params)
         under_pct = self.request.get_param("UnderExposedThreshold")
@@ -90,7 +137,8 @@ class CameraFocusStream(Component):
                 http_port=self.http_port, rtsp_port=self.rtsp_port,
                 channel=self.channel, subtype=self.subtype,
             )
-            camera.open_stream()
+            opened = camera.open_stream()
+            _debug_log("camera created; open_stream -> {}".format(opened))
             # In manual / closed-loop we drive focus ourselves, so turn off the
             # camera's own continuous autofocus tracking to stop it overriding us.
             if self.focus_mode in ("Manual", "ClosedLoop"):
@@ -125,35 +173,43 @@ class CameraFocusStream(Component):
         self.image = Image.set_frame(img=frame_obj, package_uID=self.uID, redis_db=self.redis_db)
 
     def run(self):
-        camera = self._get_camera()
-        frame = camera.read_frame()
+        try:
+            _debug_log("run() called")
+            camera = self._get_camera()
+            frame = camera.read_frame()
+            _debug_log("read_frame -> {}".format(None if frame is None else frame.shape))
 
-        if frame is None:
-            self.camera_status = {"status": "NoFrame"}
-            self._publish(np.zeros((16, 16, 3), dtype=np.uint8))
+            if frame is None:
+                self.camera_status = {"status": "NoFrame"}
+                self._publish(np.zeros((16, 16, 3), dtype=np.uint8))
+                return build_camera_stream_response(context=self)
+
+            gray, focus_matrix, self.focus_measure, self.bbox_focus_measures = \
+                FocusMeasures.tenengrad(frame, self.detections)
+
+            options = {
+                "show_zebra": self.show_zebra,
+                "show_peaking": self.show_peaking,
+                "show_center": self.show_center,
+                "show_hud": self.show_hud,
+                "grid_divisions": self.grid_divisions,
+                "under": self.under,
+                "over": self.over,
+            }
+            rendered = OverlayRenderer.render(frame, gray, focus_matrix, self.focus_measure, options)
+
+            self._apply_control(camera)
+
+            status = camera.get_focus_status()
+            self.camera_status = {k: v for k, v in status.items() if k != "raw"}
+
+            self._publish(rendered)
+            _debug_log("published outputImage type={} focus_measure={:.1f}".format(
+                type(self.image).__name__, self.focus_measure))
             return build_camera_stream_response(context=self)
-
-        gray, focus_matrix, self.focus_measure, self.bbox_focus_measures = \
-            FocusMeasures.tenengrad(frame, self.detections)
-
-        options = {
-            "show_zebra": self.show_zebra,
-            "show_peaking": self.show_peaking,
-            "show_center": self.show_center,
-            "show_hud": self.show_hud,
-            "grid_divisions": self.grid_divisions,
-            "under": self.under,
-            "over": self.over,
-        }
-        rendered = OverlayRenderer.render(frame, gray, focus_matrix, self.focus_measure, options)
-
-        self._apply_control(camera)
-
-        status = camera.get_focus_status()
-        self.camera_status = {k: v for k, v in status.items() if k != "raw"}
-
-        self._publish(rendered)
-        return build_camera_stream_response(context=self)
+        except Exception as exc:
+            _debug_log("run() ERROR: {}\n{}".format(exc, traceback.format_exc()))
+            raise
 
 
 if "__main__" == __name__:
