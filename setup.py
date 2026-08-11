@@ -8,7 +8,7 @@ setuptools.setup(
     description="Camera Focus",
     url='https://github.com/novavision-ai/camerafocus',
     license='MIT',
-    install_requires=['sdk', 'opencv-python-headless', 'numpy'],
+    install_requires=['sdk', 'opencv-python-headless', 'numpy', 'requests'],
 
     classifiers=[
         "Programming Language :: Python :: 3",
