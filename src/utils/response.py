@@ -4,7 +4,8 @@ from components.CameraFocus.src.models.PackageModel import (
     PackageModel, PackageConfigs, ConfigExecutor,
     CameraFocusBrenner, CameraFocusBrennerResponse, CameraFocusBrennerOutputs,
     CameraFocusTenengrad, CameraFocusTenengradResponse, CameraFocusTenengradOutputs,
-    OutputImage, OutputFocusMeasure, OutputBboxFocusMeasures,
+    CameraFocusStream, CameraFocusStreamResponse, CameraFocusStreamOutputs,
+    OutputImage, OutputFocusMeasure, OutputBboxFocusMeasures, OutputCameraStatus,
 )
 
 
@@ -36,6 +37,26 @@ def build_tenengrad_response(context):
     tenengradResponse = CameraFocusTenengradResponse(outputs=outputs)
     tenengradExecutor = CameraFocusTenengrad(value=tenengradResponse)
     configExecutor = ConfigExecutor(value=tenengradExecutor)
+    packageConfigs = PackageConfigs(executor=configExecutor)
+    package = PackageHelper(packageModel=PackageModel, packageConfigs=packageConfigs)
+    packageModel = package.build_model(context)
+    return packageModel
+
+
+def build_camera_stream_response(context):
+    outputImage = OutputImage(value=context.image)
+    outputFocusMeasure = OutputFocusMeasure(value=context.focus_measure)
+    outputBboxFocusMeasures = OutputBboxFocusMeasures(value=context.bbox_focus_measures)
+    outputCameraStatus = OutputCameraStatus(value=context.camera_status)
+    outputs = CameraFocusStreamOutputs(
+        outputImage=outputImage,
+        outputFocusMeasure=outputFocusMeasure,
+        outputBboxFocusMeasures=outputBboxFocusMeasures,
+        outputCameraStatus=outputCameraStatus,
+    )
+    streamResponse = CameraFocusStreamResponse(outputs=outputs)
+    streamExecutor = CameraFocusStream(value=streamResponse)
+    configExecutor = ConfigExecutor(value=streamExecutor)
     packageConfigs = PackageConfigs(executor=configExecutor)
     package = PackageHelper(packageModel=PackageModel, packageConfigs=packageConfigs)
     packageModel = package.build_model(context)
