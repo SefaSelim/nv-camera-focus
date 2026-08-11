@@ -299,8 +299,8 @@ class CameraFocusBrennerOutputs(Outputs):
 
 
 class CameraFocusBrennerRequest(Request):
-    inputs: Optional[CameraFocusBrennerInputs]
-    configs: Optional[CameraFocusBrennerConfigs]
+    inputs: Optional[CameraFocusBrennerInputs] = None
+    configs: Optional[CameraFocusBrennerConfigs] = None
 
     class Config:
         json_schema_extra = {
@@ -332,7 +332,7 @@ class CameraFocusBrenner(Config):
 # ---------------------------------------------------------------------------
 class CameraFocusTenengradInputs(Inputs):
     inputImage: InputImage
-    inputDetections: Optional[InputDetections]
+    inputDetections: Optional[InputDetections] = None
 
 
 class CameraFocusTenengradConfigs(Configs):
@@ -352,7 +352,7 @@ class CameraFocusTenengradOutputs(Outputs):
 
 
 class CameraFocusTenengradRequest(Request):
-    inputs: Optional[CameraFocusTenengradInputs]
+    inputs: Optional[CameraFocusTenengradInputs] = None
     configs: CameraFocusTenengradConfigs
 
     class Config:
@@ -634,7 +634,7 @@ class TriggerAutofocus(Config):
 
 # --- executor C aggregation ---
 class CameraFocusStreamInputs(Inputs):
-    inputDetections: Optional[InputDetections]
+    inputDetections: Optional[InputDetections] = None
 
 
 class CameraFocusStreamConfigs(Configs):
@@ -667,7 +667,7 @@ class CameraFocusStreamOutputs(Outputs):
 
 
 class CameraFocusStreamRequest(Request):
-    inputs: Optional[CameraFocusStreamInputs]
+    inputs: Optional[CameraFocusStreamInputs] = None
     configs: CameraFocusStreamConfigs
 
     class Config:
