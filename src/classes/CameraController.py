@@ -17,6 +17,7 @@ and are NEVER logged.
 """
 
 import os
+import threading
 import time
 
 import cv2
@@ -41,6 +42,10 @@ class CameraController:
         self._session.auth = HTTPDigestAuth(username, password)
 
         self._capture = None
+        self._reader = None
+        self._stop_reader = False
+        self._latest_frame = None
+        self._frame_lock = threading.Lock()
 
     # ------------------------------------------------------------------ URLs
     def _http_base(self):
@@ -153,6 +158,48 @@ class CameraController:
         code = "ZoomTele" if str(direction).lower() in ("in", "tele") else "ZoomWide"
         return self._ptz_pulse(code, speed, duration)
 
+    def _seek(self, up_code, down_code, target, read_value,
+              rate=0.30, speed=4, tolerance=0.04, max_passes=4):
+        """Drive the lens to an absolute position (0-1) with OPEN-LOOP timed
+        continuous moves.
+
+        On this firmware the absolute 'adjustFocus' is unreliable/very slow, the
+        status readout lags while the motor is moving (so closed-loop polling
+        overshoots), and short low-speed pulses can't overcome the motor's
+        start-up. But the motor runs at a roughly constant rate (~0.3 of the 0-1
+        range per second at speed 4) and the status is accurate at rest. So:
+        read the position while stopped, move for time = distance / rate, stop,
+        settle, and repeat a couple of correction passes. Directions are fixed
+        and known (up_code raises the value, down_code lowers it)."""
+        target = self._clamp01(target)
+        for _ in range(max_passes):
+            current = read_value()
+            if current is None:
+                return False
+            delta = target - current
+            if abs(delta) <= tolerance:
+                return True
+            code = up_code if delta > 0 else down_code
+            duration = min(abs(delta) / rate, 4.0)
+            self._ptz("start", code, speed)
+            time.sleep(duration)
+            self._ptz("stop", code, speed)
+            time.sleep(0.6)  # settle; the status readout is reliable at rest
+        current = read_value()
+        return current is not None and abs(current - target) <= tolerance
+
+    def set_zoom(self, target, rate=0.30, speed=4, tolerance=0.04):
+        """Set absolute zoom (0-1) with timed ZoomTele (in) / ZoomWide (out)."""
+        return self._seek("ZoomTele", "ZoomWide", target,
+                          lambda: self.get_focus_status().get("zoom"),
+                          rate, speed, tolerance)
+
+    def set_focus(self, target, rate=0.30, speed=4, tolerance=0.04):
+        """Set absolute focus (0-1) with timed FocusFar (up) / FocusNear (down)."""
+        return self._seek("FocusFar", "FocusNear", target,
+                          lambda: self.get_focus_status().get("focus"),
+                          rate, speed, tolerance)
+
     def set_continuous_autofocus(self, enabled):
         """Enable/disable the camera's own continuous autofocus tracking
         (VideoInFocus AutoFocusTrace). Disable this before driving focus manually
@@ -167,7 +214,10 @@ class CameraController:
 
     # ---------------------------------------------------------------- RTSP
     def open_stream(self):
-        """Open the RTSP stream. Returns True if opened."""
+        """Open the RTSP stream and start a background reader. Returns True if
+        opened. A dedicated thread keeps draining the stream and holds only the
+        latest frame, so processing that is slower than the camera's frame rate
+        does not accumulate latency (the preview stays real-time)."""
         # Prefer TCP transport and a low buffer to keep latency down.
         os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
         capture = cv2.VideoCapture(self.rtsp_url(), cv2.CAP_FFMPEG)
@@ -180,27 +230,47 @@ class CameraController:
             self._capture = None
             return False
         self._capture = capture
+        self._stop_reader = False
+        self._latest_frame = None
+        self._reader = threading.Thread(target=self._reader_loop, daemon=True)
+        self._reader.start()
         return True
 
-    def read_frame(self):
-        """Return the latest BGR frame, or None. Reconnects once on failure."""
-        if self._capture is None or not self._capture.isOpened():
-            if not self.open_stream():
-                return None
-        ok, frame = self._capture.read()
-        if not ok or frame is None:
-            self.release()
-            if not self.open_stream():
-                return None
-            ok, frame = self._capture.read()
+    def _reader_loop(self):
+        while not self._stop_reader:
+            capture = self._capture
+            if capture is None:
+                break
+            ok, frame = capture.read()
             if not ok or frame is None:
+                time.sleep(0.05)
+                continue
+            with self._frame_lock:
+                self._latest_frame = frame
+
+    def read_frame(self):
+        """Return the most recent BGR frame, or None. Always the freshest frame
+        the reader thread has decoded (older frames are dropped)."""
+        if self._reader is None or not self._reader.is_alive():
+            if not self.open_stream():
                 return None
-        return frame
+        for _ in range(60):
+            with self._frame_lock:
+                if self._latest_frame is not None:
+                    return self._latest_frame
+            time.sleep(0.02)
+        return None
 
     def release(self):
+        self._stop_reader = True
+        reader = self._reader
+        if reader is not None:
+            reader.join(timeout=1.0)
+            self._reader = None
         if self._capture is not None:
             self._capture.release()
             self._capture = None
+        self._latest_frame = None
 
     def close(self):
         self.release()
