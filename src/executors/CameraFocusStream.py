@@ -167,14 +167,35 @@ class CameraFocusStream(Component):
             self.bootstrap["af_state"] = state
 
     def _publish(self, frame):
-        # A source executor has no incoming frame to reuse; construct the frame
-        # object (base-model Image value holder) and publish it to Redis.
-        frame_obj = FrameImage(value=frame)
+        # A source executor has no incoming frame to reuse; construct a full
+        # frame descriptor (the SDK Image requires name/type/uID/mimeType/
+        # encoding) and publish it to Redis via set_frame (which encodes the
+        # ndarray to bytes and stores it).
+        frame_obj = FrameImage(
+            name="outputImage",
+            type="object",
+            uID=self.uID,
+            mimeType="image/jpg",
+            encoding="bytes",
+            value=frame,
+        )
         self.image = Image.set_frame(img=frame_obj, package_uID=self.uID, redis_db=self.redis_db)
 
     def run(self):
         try:
             _debug_log("run() called")
+
+            # Guard: without credentials, do NOT touch the camera. Repeated
+            # failed logins (e.g. empty password) trigger a Dahua account
+            # lockout. Publish a placeholder and report the missing config.
+            if not self.camera_ip or not self.camera_pass:
+                _debug_log("missing camera credentials (ip set={}, pass set={}); "
+                           "skipping camera to avoid lockout".format(
+                               bool(self.camera_ip), bool(self.camera_pass)))
+                self.camera_status = {"status": "MissingCredentials"}
+                self._publish(np.zeros((16, 16, 3), dtype=np.uint8))
+                return build_camera_stream_response(context=self)
+
             camera = self._get_camera()
             frame = camera.read_frame()
             _debug_log("read_frame -> {}".format(None if frame is None else frame.shape))
