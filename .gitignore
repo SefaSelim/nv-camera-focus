@@ -241,3 +241,5 @@ fabric.properties
 .idea/**/azureSettings.xml
 
 # End of https://www.toptal.com/developers/gitignore/api/pycharm
+# CameraFocus local client output images
+camerafocus_*.png

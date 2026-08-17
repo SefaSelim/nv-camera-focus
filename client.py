@@ -1,29 +1,24 @@
 """
-Local test client for the CameraFocus package.
+Local test client for the CameraFocus package (single camera-connected executor).
 
-Runs either executor (Brenner or Tenengrad) against a single image file, without
-the NovaVision platform or Redis. It builds a schema-valid request payload from
-PackageModel, then executes the real executor code with a small mock layer
-standing in for the SDK's Redis-backed Image I/O.
+Runs the CameraFocus executor in one of three modes (Brenner / Tenengrad /
+Stream) without the NovaVision platform or Redis. It builds a schema-valid
+request payload from PackageModel and executes the real executor code with a
+small Redis-free mock SDK layer.
 
 Usage:
-    python client.py --image test.jpg --task Brenner
-    python client.py --image test.jpg --task Tenengrad --grid 3x3 --show-hud true
+    # offline (synthetic frame, mock camera):
+    python client.py --mode tenengrad
+    # real camera over ONVIF:
+    python client.py --camera-ip 10.20.30.139 --camera-password PASS --mode stream \
+        --focus-mode Manual --zoom 0.4
 
-Notes:
-- "client app" is my best interpretation of the Trello item: a local runner for
-  the package. There is no built-in client pattern in the in-repo template or an
-  installed SDK to follow, so this implements the behaviour described in the
-  step. Swap it out if the team means a platform-specific client.
-- The seven Tenengrad parameters are exposed as CLI flags whose defaults are
-  read from the PackageModel schema (falling back to the documented values).
-- If the real SDK is importable it is used; otherwise Redis-free mocks are
-  installed. The Image.get_frame / Image.set_frame frame I/O is always mocked so
-  no Redis is required.
+If --camera-ip is given the real camera backend is used (ONVIF by default, or
+--protocol dahua); otherwise a mock camera yields a synthetic frame so the modes
+can be exercised offline. The password is never printed.
 """
 
 import argparse
-import json
 import os
 import sys
 import types
@@ -32,24 +27,11 @@ import numpy as np
 
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 
-# Schema-documented fallbacks (used if the model can't be introspected).
-_FALLBACK_DEFAULTS = {
-    "under": 3.0,
-    "over": 97.0,
-    "show_zebra": True,
-    "show_peaking": True,
-    "show_hud": True,
-    "show_center": True,
-    "grid": "3x3",
-}
-
 GRID_MAP = {"none": 0, "2x2": 2, "3x3": 3, "4x4": 4, "5x5": 5}
-GRID_INV = {v: k for k, v in GRID_MAP.items()}
 
 
 # ---------------------------------------------------------------------------
-# Environment wiring: make components.CameraFocus resolve to this repo, and
-# provide Redis-free SDK mocks when the real SDK is unavailable.
+# Environment: components namespace + Redis-free SDK mocks
 # ---------------------------------------------------------------------------
 def _register_components_namespace():
     if "components.CameraFocus" in sys.modules:
@@ -72,8 +54,7 @@ def _make_module(name):
 
 
 def _install_sdk_mocks():
-    """Install minimal mock SDK modules into sys.modules (no Redis)."""
-    from typing import Any, List, Optional, Union  # noqa: F401
+    from typing import Any, Optional  # noqa: F401
     from pydantic import BaseModel
 
     class _Base(BaseModel):
@@ -81,11 +62,7 @@ def _install_sdk_mocks():
             arbitrary_types_allowed = True
             extra = "allow"
 
-    class Model(_Base):
-        pass
-
     class Image(_Base):
-        # data-model Image: also carries the pixel array in .value for the mock
         value: Any = None
 
     class BoundingBox(_Base):
@@ -100,47 +77,19 @@ def _install_sdk_mocks():
         classLabel: str = ""
         classId: int = 0
 
-    class Input(_Base):
-        pass
-
-    class Output(_Base):
-        pass
-
-    class Config(_Base):
-        pass
-
-    class Inputs(_Base):
-        pass
-
-    class Configs(_Base):
-        pass
-
-    class Outputs(_Base):
-        pass
-
-    class Request(_Base):
-        pass
-
-    class Response(_Base):
-        pass
-
-    class Package(_Base):
-        pass
-
-    # sdks.novavision.src.base.model
     for name in ["sdks", "sdks.novavision", "sdks.novavision.src",
-                 "sdks.novavision.src.base"]:
+                 "sdks.novavision.src.base", "sdks.novavision.src.media",
+                 "sdks.novavision.src.helper"]:
         if name not in sys.modules:
-            m = _make_module(name)
-            m.__path__ = []
+            _make_module(name).__path__ = []
     base_model = _make_module("sdks.novavision.src.base.model")
-    for cls in (Model, Image, BoundingBox, Detection, Input, Output, Config,
-                Inputs, Configs, Outputs, Request, Response, Package):
-        setattr(base_model, cls.__name__, cls)
+    for cls_name in ["Package", "Inputs", "Configs", "Outputs", "Response",
+                     "Request", "Output", "Input", "Config", "Model"]:
+        setattr(base_model, cls_name, type(cls_name, (_Base,), {}))
+    base_model.Image = Image
+    base_model.BoundingBox = BoundingBox
+    base_model.Detection = Detection
 
-    # sdks.novavision.src.media.image -> media Image with Redis-free frame I/O
-    media = _make_module("sdks.novavision.src.media")
-    media.__path__ = []
     media_image = _make_module("sdks.novavision.src.media.image")
 
     class MediaImage:
@@ -154,7 +103,6 @@ def _install_sdk_mocks():
 
     media_image.Image = MediaImage
 
-    # sdks.novavision.src.base.component -> Component base
     component_mod = _make_module("sdks.novavision.src.base.component")
 
     class Component:
@@ -167,13 +115,10 @@ def _install_sdk_mocks():
 
     component_mod.Component = Component
 
-    # sdks.novavision.src.helper.{executor,package}
-    helper = _make_module("sdks.novavision.src.helper")
-    helper.__path__ = []
     executor_mod = _make_module("sdks.novavision.src.helper.executor")
 
     class Executor:
-        def __init__(self, *args, **kwargs):
+        def __init__(self, *a, **k):
             pass
 
         def run(self):
@@ -185,12 +130,9 @@ def _install_sdk_mocks():
 
     class PackageHelper:
         def __init__(self, packageModel=None, packageConfigs=None):
-            self.packageModel = packageModel
             self.packageConfigs = packageConfigs
 
         def build_model(self, context):
-            # The client reads outputs off the executor directly; just return the
-            # assembled configs so build_response has something to hand back.
             return self.packageConfigs
 
     package_mod.PackageHelper = PackageHelper
@@ -200,11 +142,6 @@ def setup_environment():
     _register_components_namespace()
     try:
         import sdks.novavision.src.base.model  # noqa: F401
-        import sdks.novavision.src.media.image  # noqa: F401
-        # Real SDK present: still avoid Redis by mocking the frame I/O.
-        from sdks.novavision.src.media.image import Image as RealImage
-        RealImage.get_frame = staticmethod(lambda img, redis_db=None: img)
-        RealImage.set_frame = staticmethod(lambda img, package_uID=None, redis_db=None: img)
         return "real-sdk"
     except Exception:
         _install_sdk_mocks()
@@ -212,88 +149,84 @@ def setup_environment():
 
 
 # ---------------------------------------------------------------------------
-# Schema-derived defaults
+# Mock camera (offline): synthetic frame + fake control
 # ---------------------------------------------------------------------------
-def schema_defaults():
-    try:
-        from components.CameraFocus.src.models.PackageModel import (
-            UnderExposedThreshold, OverExposedThreshold, ShowZebraWarnings,
-            ShowFocusPeaking, ShowHUD, ShowCenterMarker, GridOverlay,
-        )
-        return {
-            "under": float(UnderExposedThreshold().value),
-            "over": float(OverExposedThreshold().value),
-            "show_zebra": bool(ShowZebraWarnings().value.value),
-            "show_peaking": bool(ShowFocusPeaking().value.value),
-            "show_hud": bool(ShowHUD().value.value),
-            "show_center": bool(ShowCenterMarker().value.value),
-            "grid": GRID_INV.get(int(GridOverlay().value.value), "3x3"),
-        }
-    except Exception:
-        return dict(_FALLBACK_DEFAULTS)
+class MockController:
+    def __init__(self, *args, **kwargs):
+        import cv2
+        rng = np.random.default_rng(0)
+        frame = cv2.GaussianBlur(rng.integers(40, 210, (480, 640, 3), dtype=np.uint8), (3, 3), 0)
+        frame[:120, :120] = 5
+        frame[:120, -120:] = 252
+        self._frame = frame
+        self._zoom = 0.0
+        self._focus = 0.5
 
-
-# ---------------------------------------------------------------------------
-# Payload construction (shape validated against PackageModel)
-# ---------------------------------------------------------------------------
-def _bool_option(flag):
-    return {"name": "True", "value": True} if flag else {"name": "False", "value": False}
-
-
-def _grid_option(divisions):
-    return {"name": "grid{}".format("None" if divisions == 0 else "{0}x{0}".format(divisions)),
-            "value": divisions}
-
-
-def build_payload(task, opts, detections_payload):
-    if task == "Brenner":
-        request = {
-            "inputs": {"inputImage": {"name": "inputImage", "value": {}}},
-            "configs": {},
-        }
-        executor = {"name": "CameraFocusBrenner", "value": request}
-    else:
-        inputs = {"inputImage": {"name": "inputImage", "value": {}}}
-        if detections_payload is not None:
-            inputs["inputDetections"] = {"name": "inputDetections", "value": detections_payload}
-        request = {
-            "inputs": inputs,
-            "configs": {
-                "underExposedThreshold": {"name": "UnderExposedThreshold", "value": opts["under"]},
-                "overExposedThreshold": {"name": "OverExposedThreshold", "value": opts["over"]},
-                "showZebraWarnings": {"name": "ShowZebraWarnings", "value": _bool_option(opts["show_zebra"])},
-                "showFocusPeaking": {"name": "ShowFocusPeaking", "value": _bool_option(opts["show_peaking"])},
-                "showHUD": {"name": "ShowHUD", "value": _bool_option(opts["show_hud"])},
-                "showCenterMarker": {"name": "ShowCenterMarker", "value": _bool_option(opts["show_center"])},
-                "gridOverlay": {"name": "GridOverlay", "value": _grid_option(opts["grid_divisions"])},
-            },
-        }
-        executor = {"name": "CameraFocusTenengrad", "value": request}
-    return {
-        "configs": {"executor": {"name": "ConfigExecutor", "value": executor}},
-        "type": "component",
-        "name": "CameraFocus",
-    }
-
-
-def validate_payload(payload):
-    """Best-effort: confirm the payload is accepted by the real schema."""
-    try:
-        from components.CameraFocus.src.models.PackageModel import PackageModel
-        PackageModel(**payload)
+    def open_stream(self):
         return True
-    except Exception as exc:  # pragma: no cover - diagnostic only
-        print("  ! payload did not validate against PackageModel: {}".format(exc))
-        return False
+
+    def read_frame(self):
+        return self._frame
+
+    def release(self):
+        pass
+
+    def close(self):
+        pass
+
+    def get_status(self):
+        return {"focus": self._focus, "zoom": self._zoom, "status": "Mock"}
+
+    def capabilities(self):
+        return {"zoom": True, "focus": True, "autofocus": True}
+
+    def set_zoom(self, target):
+        self._zoom = float(target)
+        return True
+
+    def set_focus(self, target):
+        self._focus = float(target)
+        return True
+
+    def set_autofocus(self, enabled):
+        return True
+
+    def trigger_autofocus(self):
+        return True
 
 
 # ---------------------------------------------------------------------------
-# Mock request
+# Payload + request
 # ---------------------------------------------------------------------------
+def _cfg(name, value):
+    return {"name": name, "value": value}
+
+
+def build_payload(args):
+    protocol_opt = {"name": "dahuaCgi", "value": "DahuaCgi"} if args.protocol == "dahua" \
+        else {"name": "onvif", "value": "Onvif"}
+    mode_opt = {"name": args.mode, "value": args.mode.capitalize()}
+    req = {
+        "inputs": {"name": "CameraFocus"},
+        "configs": {
+            "cameraProtocol": _cfg("CameraProtocol", protocol_opt),
+            "cameraIp": _cfg("CameraIp", args.camera_ip or ""),
+            "cameraUsername": _cfg("CameraUsername", args.camera_user),
+            "cameraPassword": _cfg("CameraPassword", args.camera_password or ""),
+            "cameraHttpPort": _cfg("CameraHttpPort", args.http_port),
+            "cameraRtspPort": _cfg("CameraRtspPort", args.rtsp_port),
+            "cameraChannel": _cfg("CameraChannel", args.channel),
+            "streamSubtype": _cfg("StreamSubtype", {"name": "sub", "value": 1} if args.subtype == "sub"
+                                  else {"name": "main", "value": 0}),
+            "mode": _cfg("Mode", mode_opt),
+        },
+    }
+    return {"configs": {"executor": {"name": "ConfigExecutor",
+            "value": {"name": "CameraFocus", "value": req}}},
+            "type": "component", "name": "CameraFocus"}
+
+
 class MockRequest:
-    """Stands in for the platform request. get_param returns the concrete value
-    the executor expects (image frame, detections, or a config value)."""
-
     def __init__(self, data, params):
         self.data = data
         self._params = params
@@ -303,145 +236,109 @@ class MockRequest:
         return self._params.get(name)
 
 
-# ---------------------------------------------------------------------------
-# Detections
-# ---------------------------------------------------------------------------
-def load_detections(path):
-    with open(path, "r", encoding="utf-8") as fh:
-        raw = json.load(fh)
-    if isinstance(raw, dict):
-        raw = [raw]
-    detections = []
-    for item in raw:
-        bb = item.get("boundingBox", item)
-        detections.append({
-            "boundingBox": {
-                "left": float(bb["left"]),
-                "top": float(bb["top"]),
-                "width": float(bb["width"]),
-                "height": float(bb["height"]),
-            },
-            "confidence": float(item.get("confidence", 1.0)),
-            "classLabel": str(item.get("classLabel", "")),
-            "classId": int(item.get("classId", 0)),
-        })
-    return detections
+def build_params(args):
+    return {
+        "inputDetections": None,
+        "CameraProtocol": "DahuaCgi" if args.protocol == "dahua" else "Onvif",
+        "CameraIp": args.camera_ip or "", "CameraUsername": args.camera_user,
+        "CameraPassword": args.camera_password or "", "CameraHttpPort": args.http_port,
+        "CameraRtspPort": args.rtsp_port, "CameraChannel": args.channel,
+        "StreamSubtype": 1 if args.subtype == "sub" else 0,
+        "Mode": args.mode.capitalize(),
+        "UnderExposedThreshold": args.under, "OverExposedThreshold": args.over,
+        "ShowZebraWarnings": args.show_zebra, "ShowFocusPeaking": args.show_focus_peaking,
+        "ShowHUD": args.show_hud, "ShowCenterMarker": args.show_center_marker,
+        "GridOverlay": GRID_MAP[args.grid],
+        "FocusMode": args.focus_mode, "FocusValue": args.focus, "ZoomValue": args.zoom,
+        "FocusSearchStep": args.focus_step,
+        "TriggerAutofocus": args.trigger_autofocus,
+    }
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 def str2bool(value):
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in ("1", "true", "yes", "y", "on")
 
 
-def parse_args(defaults):
-    parser = argparse.ArgumentParser(description="Local runner for the CameraFocus package.")
-    parser.add_argument("--image", required=True, help="Path to the input image.")
-    parser.add_argument("--task", required=True, choices=["Brenner", "Tenengrad"],
-                        help="Which executor to run.")
-    parser.add_argument("--output", default=None,
-                        help="Output image path (default: <image-stem>_<task>.png).")
-    parser.add_argument("--detections", default=None,
-                        help="(Tenengrad) JSON file of bounding boxes for per-region scores.")
-
-    # Tenengrad parameters, defaults from the schema
-    parser.add_argument("--under", type=float, default=defaults["under"],
-                        help="Under-exposed threshold %% [0-100].")
-    parser.add_argument("--over", type=float, default=defaults["over"],
-                        help="Over-exposed threshold %% [0-100].")
-    parser.add_argument("--show-zebra", type=str2bool, default=defaults["show_zebra"],
-                        help="Show zebra exposure warnings (true/false).")
-    parser.add_argument("--show-focus-peaking", type=str2bool, default=defaults["show_peaking"],
-                        help="Show focus peaking (true/false).")
-    parser.add_argument("--show-hud", type=str2bool, default=defaults["show_hud"],
-                        help="Show HUD panel (true/false).")
-    parser.add_argument("--show-center-marker", type=str2bool, default=defaults["show_center"],
-                        help="Show center crosshair (true/false).")
-    parser.add_argument("--grid", choices=list(GRID_MAP.keys()), default=defaults["grid"],
-                        help="Composition grid overlay.")
-    return parser.parse_args()
+def parse_args():
+    p = argparse.ArgumentParser(description="Local runner for the CameraFocus package.")
+    p.add_argument("--mode", choices=["brenner", "tenengrad", "stream"], default="tenengrad")
+    p.add_argument("--protocol", choices=["onvif", "dahua"], default="onvif")
+    p.add_argument("--camera-ip", default=None)
+    p.add_argument("--camera-user", default="admin")
+    p.add_argument("--camera-password", default=None)
+    p.add_argument("--http-port", type=int, default=80)
+    p.add_argument("--rtsp-port", type=int, default=554)
+    p.add_argument("--channel", type=int, default=1)
+    p.add_argument("--subtype", choices=["main", "sub"], default="sub")
+    p.add_argument("--output", default=None)
+    # overlays
+    p.add_argument("--under", type=float, default=3.0)
+    p.add_argument("--over", type=float, default=97.0)
+    p.add_argument("--show-zebra", type=str2bool, default=True)
+    p.add_argument("--show-focus-peaking", type=str2bool, default=True)
+    p.add_argument("--show-hud", type=str2bool, default=True)
+    p.add_argument("--show-center-marker", type=str2bool, default=True)
+    p.add_argument("--grid", choices=list(GRID_MAP.keys()), default="3x3")
+    # control (stream)
+    p.add_argument("--focus-mode", choices=["Manual", "OnePushAutofocus", "ClosedLoop"], default="Manual")
+    p.add_argument("--focus", type=float, default=0.5)
+    p.add_argument("--zoom", type=float, default=0.0)
+    p.add_argument("--focus-step", type=float, default=0.02)
+    p.add_argument("--trigger-autofocus", type=str2bool, default=False)
+    return p.parse_args()
 
 
 def main():
-    mode = setup_environment()
-    defaults = schema_defaults()
-    args = parse_args(defaults)
+    mode_env = setup_environment()
+    args = parse_args()
 
-    import cv2  # imported after env setup to keep failures local
+    import cv2  # noqa: F401  (imported after env setup)
 
-    image = cv2.imread(args.image, cv2.IMREAD_COLOR)
-    if image is None:
-        print("ERROR: could not read image: {}".format(args.image))
-        return 2
+    use_real = bool(args.camera_ip)
+    if not use_real:
+        # Offline: placeholder credentials so the executor's credential guard
+        # passes; the mock camera ignores them.
+        args.camera_ip = "mock"
+        args.camera_password = "mock"
 
-    output_path = args.output or "{}_{}.png".format(
-        os.path.splitext(os.path.basename(args.image))[0], args.task)
+    # Validate the payload against the real schema.
+    from components.CameraFocus.src.models.PackageModel import PackageModel
+    payload = build_payload(args)
+    try:
+        PackageModel(**payload)
+    except Exception as exc:
+        print("  ! payload did not validate: {}".format(exc))
 
-    # For Tenengrad always carry an inputDetections field (empty list = no boxes).
-    # Under the real SDK's Pydantic v1, Optional[InputDetections] defaults to
-    # None so it could be omitted; sending an empty list keeps the payload valid
-    # under both Pydantic v1 and v2 and is equivalent to "no detections".
-    detections_payload = None
-    if args.task == "Tenengrad":
-        detections_payload = load_detections(args.detections) if args.detections else []
+    from components.CameraFocus.src.executors import CameraFocus as cf_module
+    if not use_real:
+        cf_module.CameraController = MockController  # offline: synthetic frame
 
-    opts = {
-        "under": float(args.under),
-        "over": float(args.over),
-        "show_zebra": bool(args.show_zebra),
-        "show_peaking": bool(args.show_focus_peaking),
-        "show_hud": bool(args.show_hud),
-        "show_center": bool(args.show_center_marker),
-        "grid_divisions": GRID_MAP[args.grid],
-    }
+    request = MockRequest(payload, build_params(args))
+    executor = cf_module.CameraFocus(request, {})
 
-    payload = build_payload(args.task, opts, detections_payload)
-
-    print("CameraFocus client [{}]".format(mode))
-    print("  task   : {}".format(args.task))
-    print("  image  : {}  ({}x{})".format(args.image, image.shape[1], image.shape[0]))
-    validate_payload(payload)
-
-    # Build the data-model Image frame carrying the pixel array.
-    from sdks.novavision.src.base.model import Image as ModelImage
-    frame = ModelImage(value=image)
-
-    params = {"inputImage": frame, "inputDetections": detections_payload}
-    if args.task == "Tenengrad":
-        params.update({
-            "UnderExposedThreshold": opts["under"],
-            "OverExposedThreshold": opts["over"],
-            "ShowZebraWarnings": opts["show_zebra"],
-            "ShowFocusPeaking": opts["show_peaking"],
-            "ShowHUD": opts["show_hud"],
-            "ShowCenterMarker": opts["show_center"],
-            "GridOverlay": opts["grid_divisions"],
-        })
-
-    request = MockRequest(data=payload, params=params)
-
-    if args.task == "Brenner":
-        from components.CameraFocus.src.executors.CameraFocusBrenner import CameraFocusBrenner
-        executor = CameraFocusBrenner(request, {})
-    else:
-        from components.CameraFocus.src.executors.CameraFocusTenengrad import CameraFocusTenengrad
-        executor = CameraFocusTenengrad(request, {})
+    print("CameraFocus client [{} | {}]".format(
+        mode_env, "real-camera" if use_real else "mock-camera"))
+    print("  mode     : {}".format(args.mode))
+    print("  protocol : {}".format(args.protocol))
 
     executor.run()
 
-    # Handle outputs
-    out_image = executor.image.value
-    cv2.imwrite(output_path, out_image)
-    print("  outputImage        -> {}".format(output_path))
+    out_path = args.output or "camerafocus_{}.png".format(args.mode)
+    import cv2
+    cv2.imwrite(out_path, executor.image.value)
+    print("  outputImage        -> {}".format(out_path))
     print("  outputFocusMeasure : {:.4f}".format(executor.focus_measure))
-    if args.task == "Tenengrad":
-        measures = executor.bbox_focus_measures
-        print("  outputBboxFocusMeasures ({} box(es)):".format(len(measures)))
+    measures = executor.bbox_focus_measures
+    if measures:
+        print("  outputBboxFocusMeasures ({}):".format(len(measures)))
         for i, m in enumerate(measures):
             print("    [{}] {}".format(i, "nan" if m != m else "{:.4f}".format(m)))
+    print("  outputCameraStatus : {}".format(executor.camera_status))
+
+    if not use_real:
+        executor.bootstrap.get("camera") and executor.bootstrap["camera"].close()
     return 0
 
 
