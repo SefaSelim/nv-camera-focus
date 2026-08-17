@@ -2,61 +2,25 @@
 from sdks.novavision.src.helper.package import PackageHelper
 from components.CameraFocus.src.models.PackageModel import (
     PackageModel, PackageConfigs, ConfigExecutor,
-    CameraFocusBrenner, CameraFocusBrennerResponse, CameraFocusBrennerOutputs,
-    CameraFocusTenengrad, CameraFocusTenengradResponse, CameraFocusTenengradOutputs,
-    CameraFocusStream, CameraFocusStreamResponse, CameraFocusStreamOutputs,
+    CameraFocus, CameraFocusResponse, CameraFocusOutputs,
     OutputImage, OutputFocusMeasure, OutputBboxFocusMeasures, OutputCameraStatus,
 )
 
 
-def build_brenner_response(context):
-    outputImage = OutputImage(value=context.image)
-    outputFocusMeasure = OutputFocusMeasure(value=context.focus_measure)
-    outputs = CameraFocusBrennerOutputs(
-        outputImage=outputImage,
-        outputFocusMeasure=outputFocusMeasure,
-    )
-    brennerResponse = CameraFocusBrennerResponse(outputs=outputs)
-    brennerExecutor = CameraFocusBrenner(value=brennerResponse)
-    configExecutor = ConfigExecutor(value=brennerExecutor)
-    packageConfigs = PackageConfigs(executor=configExecutor)
-    package = PackageHelper(packageModel=PackageModel, packageConfigs=packageConfigs)
-    packageModel = package.build_model(context)
-    return packageModel
-
-
-def build_tenengrad_response(context):
-    outputImage = OutputImage(value=context.image)
-    outputFocusMeasure = OutputFocusMeasure(value=context.focus_measure)
-    outputBboxFocusMeasures = OutputBboxFocusMeasures(value=context.bbox_focus_measures)
-    outputs = CameraFocusTenengradOutputs(
-        outputImage=outputImage,
-        outputFocusMeasure=outputFocusMeasure,
-        outputBboxFocusMeasures=outputBboxFocusMeasures,
-    )
-    tenengradResponse = CameraFocusTenengradResponse(outputs=outputs)
-    tenengradExecutor = CameraFocusTenengrad(value=tenengradResponse)
-    configExecutor = ConfigExecutor(value=tenengradExecutor)
-    packageConfigs = PackageConfigs(executor=configExecutor)
-    package = PackageHelper(packageModel=PackageModel, packageConfigs=packageConfigs)
-    packageModel = package.build_model(context)
-    return packageModel
-
-
-def build_camera_stream_response(context):
+def build_response(context):
     outputImage = OutputImage(value=context.image)
     outputFocusMeasure = OutputFocusMeasure(value=context.focus_measure)
     outputBboxFocusMeasures = OutputBboxFocusMeasures(value=context.bbox_focus_measures)
     outputCameraStatus = OutputCameraStatus(value=context.camera_status)
-    outputs = CameraFocusStreamOutputs(
+    outputs = CameraFocusOutputs(
         outputImage=outputImage,
         outputFocusMeasure=outputFocusMeasure,
         outputBboxFocusMeasures=outputBboxFocusMeasures,
         outputCameraStatus=outputCameraStatus,
     )
-    streamResponse = CameraFocusStreamResponse(outputs=outputs)
-    streamExecutor = CameraFocusStream(value=streamResponse)
-    configExecutor = ConfigExecutor(value=streamExecutor)
+    response = CameraFocusResponse(outputs=outputs)
+    executor = CameraFocus(value=response)
+    configExecutor = ConfigExecutor(value=executor)
     packageConfigs = PackageConfigs(executor=configExecutor)
     package = PackageHelper(packageModel=PackageModel, packageConfigs=packageConfigs)
     packageModel = package.build_model(context)

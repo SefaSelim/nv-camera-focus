@@ -61,14 +61,14 @@ class AutofocusController:
         # First call: learn the current focus position from the camera, record
         # its score as the baseline, and probe one step in the current direction.
         if state["position"] is None:
-            status = controller.get_focus_status()
+            status = controller.get_status()
             current = status.get("focus")
             current = 0.5 if current is None else AutofocusController._clamp01(current)
             state["position"] = current
             state["best_score"] = focus_score
             state["best_position"] = current
             next_position = AutofocusController._clamp01(current + state["direction"] * state["step"])
-            controller.set_focus_zoom(next_position, zoom)
+            controller.set_focus(next_position)
             state["position"] = next_position
             return state
 
@@ -85,7 +85,7 @@ class AutofocusController:
             state["step"] = state["step"] * 0.5
             if state["step"] < state["min_step"]:
                 # Converged: park the lens at the best position seen.
-                controller.set_focus_zoom(state["best_position"], zoom)
+                controller.set_focus(state["best_position"])
                 state["position"] = state["best_position"]
                 state["converged"] = True
                 return state
