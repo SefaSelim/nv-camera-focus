@@ -11,23 +11,6 @@ from sdks.novavision.src.base.model import (
 # ---------------------------------------------------------------------------
 # Inputs
 # ---------------------------------------------------------------------------
-class InputImage(Input):
-    name: Literal["inputImage"] = "inputImage"
-    value: Union[List[Image], Image]
-    type: str = "object"
-
-    @validator("type", pre=True, always=True)
-    def set_type_based_on_value(cls, value, values):
-        value = values.get('value')
-        if isinstance(value, Image):
-            return "object"
-        elif isinstance(value, list):
-            return "list"
-
-    class Config:
-        title = "Image"
-
-
 class InputDetections(Input):
     name: Literal["inputDetections"] = "inputDetections"
     value: Union[List[Detection], Detection]
@@ -75,8 +58,17 @@ class OutputBboxFocusMeasures(Output):
         title = "Bbox Focus Measures"
 
 
+class OutputCameraStatus(Output):
+    name: Literal["outputCameraStatus"] = "outputCameraStatus"
+    value: Union[dict, list]
+    type: str = "object"
+
+    class Config:
+        title = "Camera Status"
+
+
 # ---------------------------------------------------------------------------
-# Option classes (leaf nodes) -- reused by the boolean dropdowns
+# Shared option classes
 # ---------------------------------------------------------------------------
 class OptionDisable(Config):
     name: Literal["False"] = "False"
@@ -150,14 +142,14 @@ class Grid5x5(Config):
 
 
 # ---------------------------------------------------------------------------
-# Configuration parameters (Tenengrad)
+# Overlay parameters (used by Tenengrad and Stream modes)
 # ---------------------------------------------------------------------------
 class UnderExposedThreshold(Config):
     """
         Brightness level, as a percentage of the 0-255 range, below which a
-        pixel is treated as under-exposed (crushed shadow). Pixels darker than
-        this are flagged by the zebra overlay. Raising it flags more dark
-        pixels as clipped; lowering it flags fewer.
+        pixel is treated as under-exposed. Pixels darker than this are flagged
+        by the zebra overlay. Raising it flags more dark pixels; lowering it
+        flags fewer.
     """
     name: Literal["UnderExposedThreshold"] = "UnderExposedThreshold"
     value: float = Field(ge=0.0, le=100.0, default=3.0)
@@ -167,17 +159,15 @@ class UnderExposedThreshold(Config):
 
     class Config:
         title = "Under-Exposed Threshold"
-        json_schema_extra = {
-            "shortDescription": "Under-Exposed Threshold (%)"
-        }
+        json_schema_extra = {"shortDescription": "Under-Exposed Threshold (%)"}
 
 
 class OverExposedThreshold(Config):
     """
         Brightness level, as a percentage of the 0-255 range, above which a
-        pixel is treated as over-exposed (blown highlight). Pixels brighter
-        than this are flagged by the zebra overlay. Lowering it flags more
-        bright pixels as clipped; raising it flags fewer.
+        pixel is treated as over-exposed. Pixels brighter than this are flagged
+        by the zebra overlay. Lowering it flags more bright pixels; raising it
+        flags fewer.
     """
     name: Literal["OverExposedThreshold"] = "OverExposedThreshold"
     value: float = Field(ge=0.0, le=100.0, default=97.0)
@@ -187,16 +177,13 @@ class OverExposedThreshold(Config):
 
     class Config:
         title = "Over-Exposed Threshold"
-        json_schema_extra = {
-            "shortDescription": "Over-Exposed Threshold (%)"
-        }
+        json_schema_extra = {"shortDescription": "Over-Exposed Threshold (%)"}
 
 
 class ShowZebraWarnings(Config):
     """
         Toggle the diagonal zebra stripes that mark under- and over-exposed
-        regions. Enable to see where the image is clipping in shadows or
-        highlights; disable for a clean, unmarked image.
+        regions. Enable to see exposure clipping; disable for a clean image.
     """
     name: Literal["ShowZebraWarnings"] = "ShowZebraWarnings"
     value: Union[OptionEnable, OptionDisable] = Field(default_factory=OptionEnable)
@@ -205,16 +192,13 @@ class ShowZebraWarnings(Config):
 
     class Config:
         title = "Show Zebra Warnings"
-        json_schema_extra = {
-            "shortDescription": "Show Zebra Warnings"
-        }
+        json_schema_extra = {"shortDescription": "Show Zebra Warnings"}
 
 
 class ShowFocusPeaking(Config):
     """
         Toggle the green focus-peaking overlay that highlights the sharpest
-        regions of the frame. Enable to see what is critically in focus;
-        disable to hide it.
+        regions of the frame. Enable to see what is in focus; disable to hide it.
     """
     name: Literal["ShowFocusPeaking"] = "ShowFocusPeaking"
     value: Union[OptionEnable, OptionDisable] = Field(default_factory=OptionEnable)
@@ -223,16 +207,13 @@ class ShowFocusPeaking(Config):
 
     class Config:
         title = "Show Focus Peaking"
-        json_schema_extra = {
-            "shortDescription": "Show Focus Peaking"
-        }
+        json_schema_extra = {"shortDescription": "Show Focus Peaking"}
 
 
 class ShowHUD(Config):
     """
-        Toggle the heads-up display panel showing the overall focus score and
-        exposure histograms. Enable for on-image diagnostics; disable for a
-        clean image.
+        Toggle the heads-up display panel showing the focus score and exposure
+        histograms. Enable for on-image diagnostics; disable for a clean image.
     """
     name: Literal["ShowHUD"] = "ShowHUD"
     value: Union[OptionEnable, OptionDisable] = Field(default_factory=OptionEnable)
@@ -241,15 +222,13 @@ class ShowHUD(Config):
 
     class Config:
         title = "Show HUD"
-        json_schema_extra = {
-            "shortDescription": "Show HUD"
-        }
+        json_schema_extra = {"shortDescription": "Show HUD"}
 
 
 class ShowCenterMarker(Config):
     """
-        Toggle the center crosshair marker. Enable to aid composition and
-        centering; disable to hide it.
+        Toggle the center crosshair marker. Enable to aid composition; disable
+        to hide it.
     """
     name: Literal["ShowCenterMarker"] = "ShowCenterMarker"
     value: Union[OptionEnable, OptionDisable] = Field(default_factory=OptionEnable)
@@ -258,17 +237,14 @@ class ShowCenterMarker(Config):
 
     class Config:
         title = "Show Center Marker"
-        json_schema_extra = {
-            "shortDescription": "Show Center Marker"
-        }
+        json_schema_extra = {"shortDescription": "Show Center Marker"}
 
 
 class GridOverlay(Config):
     """
-        Composition grid drawn over the image. Choose the number of divisions:
-        None disables the grid, 3x3 gives the rule-of-thirds guide, and higher
-        values draw a denser grid. Changing this only affects the overlay, not
-        the focus measurement.
+        Composition grid drawn over the image. None disables the grid, 3x3 is
+        the rule-of-thirds guide, higher values are denser. Affects only the
+        overlay, not the focus measurement.
     """
     name: Literal["GridOverlay"] = "GridOverlay"
     value: Union[GridNone, Grid2x2, Grid3x3, Grid4x4, Grid5x5] = Field(default_factory=Grid3x3)
@@ -277,145 +253,12 @@ class GridOverlay(Config):
 
     class Config:
         title = "Grid Overlay"
-        json_schema_extra = {
-            "shortDescription": "Grid Overlay"
-        }
+        json_schema_extra = {"shortDescription": "Grid Overlay"}
 
 
 # ---------------------------------------------------------------------------
-# Executor A: CameraFocusBrenner (no parameters)
+# Control parameters (Stream mode)
 # ---------------------------------------------------------------------------
-class CameraFocusBrennerInputs(Inputs):
-    inputImage: InputImage
-
-
-class CameraFocusBrennerConfigs(Configs):
-    pass
-
-
-class CameraFocusBrennerOutputs(Outputs):
-    outputImage: OutputImage
-    outputFocusMeasure: OutputFocusMeasure
-
-
-class CameraFocusBrennerRequest(Request):
-    inputs: Optional[CameraFocusBrennerInputs] = None
-    configs: Optional[CameraFocusBrennerConfigs] = None
-
-    class Config:
-        json_schema_extra = {
-            "target": "configs"
-        }
-
-
-class CameraFocusBrennerResponse(Response):
-    outputs: CameraFocusBrennerOutputs
-
-
-class CameraFocusBrenner(Config):
-    name: Literal["CameraFocusBrenner"] = "CameraFocusBrenner"
-    value: Union[CameraFocusBrennerRequest, CameraFocusBrennerResponse]
-    type: Literal["object"] = "object"
-    field: Literal["option"] = "option"
-
-    class Config:
-        title = "Camera Focus Brenner"
-        json_schema_extra = {
-            "target": {
-                "value": 0
-            }
-        }
-
-
-# ---------------------------------------------------------------------------
-# Executor B: CameraFocusTenengrad (seven parameters)
-# ---------------------------------------------------------------------------
-class CameraFocusTenengradInputs(Inputs):
-    inputImage: InputImage
-    inputDetections: Optional[InputDetections] = None
-
-
-class CameraFocusTenengradConfigs(Configs):
-    underExposedThreshold: UnderExposedThreshold
-    overExposedThreshold: OverExposedThreshold
-    showZebraWarnings: ShowZebraWarnings
-    showFocusPeaking: ShowFocusPeaking
-    showHUD: ShowHUD
-    showCenterMarker: ShowCenterMarker
-    gridOverlay: GridOverlay
-
-
-class CameraFocusTenengradOutputs(Outputs):
-    outputImage: OutputImage
-    outputFocusMeasure: OutputFocusMeasure
-    outputBboxFocusMeasures: OutputBboxFocusMeasures
-
-
-class CameraFocusTenengradRequest(Request):
-    inputs: Optional[CameraFocusTenengradInputs] = None
-    configs: CameraFocusTenengradConfigs
-
-    class Config:
-        json_schema_extra = {
-            "target": "configs"
-        }
-
-
-class CameraFocusTenengradResponse(Response):
-    outputs: CameraFocusTenengradOutputs
-
-
-class CameraFocusTenengrad(Config):
-    name: Literal["CameraFocusTenengrad"] = "CameraFocusTenengrad"
-    value: Union[CameraFocusTenengradRequest, CameraFocusTenengradResponse]
-    type: Literal["object"] = "object"
-    field: Literal["option"] = "option"
-
-    class Config:
-        title = "Camera Focus Tenengrad"
-        json_schema_extra = {
-            "target": {
-                "value": 0
-            }
-        }
-
-
-# ---------------------------------------------------------------------------
-# Executor C: CameraFocusStream (self-contained Dahua camera source + control)
-# ---------------------------------------------------------------------------
-
-# --- camera status output ---
-class OutputCameraStatus(Output):
-    name: Literal["outputCameraStatus"] = "outputCameraStatus"
-    value: Union[dict, list]
-    type: str = "object"
-
-    class Config:
-        title = "Camera Status"
-
-
-# --- stream subtype options ---
-class SubtypeMain(Config):
-    name: Literal["main"] = "main"
-    value: Literal[0] = 0
-    type: Literal["number"] = "number"
-    field: Literal["option"] = "option"
-
-    class Config:
-        title = "Main Stream"
-
-
-class SubtypeSub(Config):
-    name: Literal["sub"] = "sub"
-    value: Literal[1] = 1
-    type: Literal["number"] = "number"
-    field: Literal["option"] = "option"
-
-    class Config:
-        title = "Sub Stream"
-
-
-# --- focus-mode options ---
 class FocusModeManual(Config):
     name: Literal["manual"] = "manual"
     value: Literal["Manual"] = "Manual"
@@ -446,120 +289,13 @@ class FocusModeClosedLoop(Config):
         title = "Closed-Loop Autofocus"
 
 
-# --- camera connection configs ---
-class CameraIp(Config):
-    """
-        IPv4 address of the Dahua camera. The executor connects to this address
-        over RTSP (video) and HTTP CGI (focus/zoom control).
-    """
-    name: Literal["CameraIp"] = "CameraIp"
-    value: str = ""
-    type: Literal["string"] = "string"
-    field: Literal["textInput"] = "textInput"
-
-    class Config:
-        title = "Camera IP"
-        json_schema_extra = {"shortDescription": "Camera IP address"}
-
-
-class CameraUsername(Config):
-    """
-        Username for the camera's HTTP/RTSP authentication (usually 'admin').
-    """
-    name: Literal["CameraUsername"] = "CameraUsername"
-    value: str = "admin"
-    type: Literal["string"] = "string"
-    field: Literal["textInput"] = "textInput"
-
-    class Config:
-        title = "Camera Username"
-        json_schema_extra = {"shortDescription": "Camera username"}
-
-
-class CameraPassword(Config):
-    """
-        Password for the camera's HTTP/RTSP authentication. Entered in the node
-        config. The executor never logs it (only its length in diagnostics).
-        Note: this is a plain textInput because it must be user-editable; the
-        hiddenInput field type is not shown in the form, so it cannot be used
-        for a value the user needs to type.
-    """
-    name: Literal["CameraPassword"] = "CameraPassword"
-    value: str = ""
-    type: Literal["string"] = "string"
-    field: Literal["textInput"] = "textInput"
-
-    class Config:
-        title = "Camera Password"
-        json_schema_extra = {"shortDescription": "Camera password"}
-
-
-class CameraHttpPort(Config):
-    """
-        HTTP port used for the Dahua CGI control API. Default 80.
-    """
-    name: Literal["CameraHttpPort"] = "CameraHttpPort"
-    value: int = Field(ge=1, le=65535, default=80)
-    type: Literal["number"] = "number"
-    field: Literal["textInput"] = "textInput"
-
-    class Config:
-        title = "Camera HTTP Port"
-        json_schema_extra = {"shortDescription": "HTTP/CGI port"}
-
-
-class CameraRtspPort(Config):
-    """
-        RTSP port used to pull the camera video stream. Default 554.
-    """
-    name: Literal["CameraRtspPort"] = "CameraRtspPort"
-    value: int = Field(ge=1, le=65535, default=554)
-    type: Literal["number"] = "number"
-    field: Literal["textInput"] = "textInput"
-
-    class Config:
-        title = "Camera RTSP Port"
-        json_schema_extra = {"shortDescription": "RTSP port"}
-
-
-class CameraChannel(Config):
-    """
-        Camera channel index for the RTSP URL and the PTZ CGI calls. Default 1.
-    """
-    name: Literal["CameraChannel"] = "CameraChannel"
-    value: int = Field(ge=1, le=64, default=1)
-    type: Literal["number"] = "number"
-    field: Literal["textInput"] = "textInput"
-
-    class Config:
-        title = "Camera Channel"
-        json_schema_extra = {"shortDescription": "Channel index"}
-
-
-class StreamSubtype(Config):
-    """
-        Which RTSP stream to pull: Main is higher resolution, Sub is lighter and
-        faster. Changing this affects only the pulled frame, not the control.
-    """
-    name: Literal["StreamSubtype"] = "StreamSubtype"
-    value: Union[SubtypeMain, SubtypeSub] = Field(default_factory=SubtypeMain)
-    type: Literal["object"] = "object"
-    field: Literal["dropdownlist"] = "dropdownlist"
-
-    class Config:
-        title = "Stream Subtype"
-        json_schema_extra = {"shortDescription": "Main / Sub stream"}
-
-
-# --- control configs ---
 class FocusMode(Config):
     """
-        How the camera focus is driven. Manual writes FocusValue/ZoomValue (or,
-        if TriggerAutofocus is enabled, fires a one-push autofocus).
-        OnePushAutofocus fires the camera's own autofocus once. ClosedLoop
-        continuously hill-climbs the Tenengrad focus measure. For Manual and
-        ClosedLoop the camera's continuous autofocus tracking is disabled so our
-        commands are not overridden.
+        How focus is driven in Stream mode. Manual writes FocusValue/ZoomValue
+        (or fires one-push if TriggerAutofocus is enabled); OnePushAutofocus
+        fires the camera's autofocus once; ClosedLoop continuously hill-climbs
+        the Tenengrad focus measure. Manual and ClosedLoop first disable the
+        camera's own continuous autofocus so our commands hold.
     """
     name: Literal["FocusMode"] = "FocusMode"
     value: Union[FocusModeManual, FocusModeOnePush, FocusModeClosedLoop] = Field(
@@ -575,7 +311,7 @@ class FocusMode(Config):
 class FocusValue(Config):
     """
         Target absolute focus position (0.0-1.0) written to the camera in Manual
-        mode. 0.0 is one extreme of the lens travel, 1.0 the other.
+        mode.
     """
     name: Literal["FocusValue"] = "FocusValue"
     value: float = Field(ge=0.0, le=1.0, default=0.5)
@@ -607,7 +343,7 @@ class ZoomValue(Config):
 class FocusSearchStep(Config):
     """
         Step size (0.0-1.0) used by the closed-loop autofocus hill-climb. Larger
-        steps converge faster but overshoot; smaller steps are more precise.
+        converges faster but overshoots; smaller is more precise.
     """
     name: Literal["FocusSearchStep"] = "FocusSearchStep"
     value: float = Field(ge=0.0, le=1.0, default=0.02)
@@ -622,8 +358,8 @@ class FocusSearchStep(Config):
 
 class TriggerAutofocus(Config):
     """
-        In Manual mode, when Enabled, fire a one-push autofocus on this run
-        instead of writing FocusValue/ZoomValue. Ignored in the other modes.
+        In Manual mode, when Enabled, fire a one-push autofocus this run instead
+        of writing FocusValue/ZoomValue. Ignored in the other focus modes.
     """
     name: Literal["TriggerAutofocus"] = "TriggerAutofocus"
     value: Union[OptionEnable, OptionDisable] = Field(default_factory=OptionDisable)
@@ -635,12 +371,246 @@ class TriggerAutofocus(Config):
         json_schema_extra = {"shortDescription": "Fire one-push AF (Manual)"}
 
 
-# --- executor C aggregation ---
-class CameraFocusStreamInputs(Inputs):
+# ---------------------------------------------------------------------------
+# Camera connection (shared, always shown)
+# ---------------------------------------------------------------------------
+class ProtocolOnvif(Config):
+    name: Literal["onvif"] = "onvif"
+    value: Literal["Onvif"] = "Onvif"
+    type: Literal["string"] = "string"
+    field: Literal["option"] = "option"
+
+    class Config:
+        title = "ONVIF (multi-brand)"
+
+
+class ProtocolDahuaCgi(Config):
+    name: Literal["dahuaCgi"] = "dahuaCgi"
+    value: Literal["DahuaCgi"] = "DahuaCgi"
+    type: Literal["string"] = "string"
+    field: Literal["option"] = "option"
+
+    class Config:
+        title = "Dahua HTTP-CGI"
+
+
+class CameraProtocol(Config):
+    """
+        Camera control protocol. ONVIF is vendor-neutral and works across many
+        IP-camera brands (video, focus, zoom); Dahua HTTP-CGI is Dahua-specific.
+    """
+    name: Literal["CameraProtocol"] = "CameraProtocol"
+    value: Union[ProtocolOnvif, ProtocolDahuaCgi] = Field(default_factory=ProtocolOnvif)
+    type: Literal["object"] = "object"
+    field: Literal["dropdownlist"] = "dropdownlist"
+
+    class Config:
+        title = "Camera Protocol"
+        json_schema_extra = {"shortDescription": "ONVIF (multi-brand) / Dahua CGI"}
+
+
+class CameraIp(Config):
+    """
+        IPv4 address of the camera. The executor connects to it for the video
+        stream (RTSP) and for focus/zoom control.
+    """
+    name: Literal["CameraIp"] = "CameraIp"
+    value: str = ""
+    type: Literal["string"] = "string"
+    field: Literal["textInput"] = "textInput"
+
+    class Config:
+        title = "Camera IP"
+        json_schema_extra = {"shortDescription": "Camera IP address"}
+
+
+class CameraUsername(Config):
+    """
+        Username for the camera's authentication (usually 'admin'; for ONVIF an
+        ONVIF-enabled user).
+    """
+    name: Literal["CameraUsername"] = "CameraUsername"
+    value: str = "admin"
+    type: Literal["string"] = "string"
+    field: Literal["textInput"] = "textInput"
+
+    class Config:
+        title = "Camera Username"
+        json_schema_extra = {"shortDescription": "Camera username"}
+
+
+class CameraPassword(Config):
+    """
+        Password for the camera. Entered in the node config; the executor never
+        logs it. A plain textInput because the value must be user-editable (the
+        hiddenInput field type is not rendered in the form).
+    """
+    name: Literal["CameraPassword"] = "CameraPassword"
+    value: str = ""
+    type: Literal["string"] = "string"
+    field: Literal["textInput"] = "textInput"
+
+    class Config:
+        title = "Camera Password"
+        json_schema_extra = {"shortDescription": "Camera password"}
+
+
+class CameraHttpPort(Config):
+    """
+        HTTP port for camera control: the ONVIF service port for the ONVIF
+        protocol, or the CGI port for Dahua. Usually 80.
+    """
+    name: Literal["CameraHttpPort"] = "CameraHttpPort"
+    value: int = Field(ge=1, le=65535, default=80)
+    type: Literal["number"] = "number"
+    field: Literal["textInput"] = "textInput"
+
+    class Config:
+        title = "Camera HTTP/ONVIF Port"
+        json_schema_extra = {"shortDescription": "HTTP/ONVIF port"}
+
+
+class CameraRtspPort(Config):
+    """
+        RTSP port for the camera video stream (used by the Dahua backend and as
+        a fallback). Usually 554.
+    """
+    name: Literal["CameraRtspPort"] = "CameraRtspPort"
+    value: int = Field(ge=1, le=65535, default=554)
+    type: Literal["number"] = "number"
+    field: Literal["textInput"] = "textInput"
+
+    class Config:
+        title = "Camera RTSP Port"
+        json_schema_extra = {"shortDescription": "RTSP port"}
+
+
+class CameraChannel(Config):
+    """
+        Camera channel index for the RTSP URL / control. Usually 1.
+    """
+    name: Literal["CameraChannel"] = "CameraChannel"
+    value: int = Field(ge=1, le=64, default=1)
+    type: Literal["number"] = "number"
+    field: Literal["textInput"] = "textInput"
+
+    class Config:
+        title = "Camera Channel"
+        json_schema_extra = {"shortDescription": "Channel index"}
+
+
+class SubtypeMain(Config):
+    name: Literal["main"] = "main"
+    value: Literal[0] = 0
+    type: Literal["number"] = "number"
+    field: Literal["option"] = "option"
+
+    class Config:
+        title = "Main Stream"
+
+
+class SubtypeSub(Config):
+    name: Literal["sub"] = "sub"
+    value: Literal[1] = 1
+    type: Literal["number"] = "number"
+    field: Literal["option"] = "option"
+
+    class Config:
+        title = "Sub Stream"
+
+
+class StreamSubtype(Config):
+    """
+        Which stream to pull: Main is higher resolution, Sub is lighter and
+        smoother for live preview. Affects only the pulled frame, not control.
+    """
+    name: Literal["StreamSubtype"] = "StreamSubtype"
+    value: Union[SubtypeMain, SubtypeSub] = Field(default_factory=SubtypeMain)
+    type: Literal["object"] = "object"
+    field: Literal["dropdownlist"] = "dropdownlist"
+
+    class Config:
+        title = "Stream Subtype"
+        json_schema_extra = {"shortDescription": "Main / Sub stream"}
+
+
+# ---------------------------------------------------------------------------
+# Mode (dependentDropdownlist): Brenner | Tenengrad | Stream
+# ---------------------------------------------------------------------------
+class BrennerMode(Config):
+    name: Literal["brenner"] = "brenner"
+    value: Literal["Brenner"] = "Brenner"
+    type: Literal["string"] = "string"
+    field: Literal["option"] = "option"
+
+    class Config:
+        title = "Brenner"
+
+
+class TenengradMode(Config):
+    underExposedThreshold: UnderExposedThreshold = Field(default_factory=UnderExposedThreshold)
+    overExposedThreshold: OverExposedThreshold = Field(default_factory=OverExposedThreshold)
+    showZebraWarnings: ShowZebraWarnings = Field(default_factory=ShowZebraWarnings)
+    showFocusPeaking: ShowFocusPeaking = Field(default_factory=ShowFocusPeaking)
+    showHUD: ShowHUD = Field(default_factory=ShowHUD)
+    showCenterMarker: ShowCenterMarker = Field(default_factory=ShowCenterMarker)
+    gridOverlay: GridOverlay = Field(default_factory=GridOverlay)
+    name: Literal["tenengrad"] = "tenengrad"
+    value: Literal["Tenengrad"] = "Tenengrad"
+    type: Literal["string"] = "string"
+    field: Literal["option"] = "option"
+
+    class Config:
+        title = "Tenengrad"
+
+
+class StreamMode(Config):
+    underExposedThreshold: UnderExposedThreshold = Field(default_factory=UnderExposedThreshold)
+    overExposedThreshold: OverExposedThreshold = Field(default_factory=OverExposedThreshold)
+    showZebraWarnings: ShowZebraWarnings = Field(default_factory=ShowZebraWarnings)
+    showFocusPeaking: ShowFocusPeaking = Field(default_factory=ShowFocusPeaking)
+    showHUD: ShowHUD = Field(default_factory=ShowHUD)
+    showCenterMarker: ShowCenterMarker = Field(default_factory=ShowCenterMarker)
+    gridOverlay: GridOverlay = Field(default_factory=GridOverlay)
+    focusMode: FocusMode = Field(default_factory=FocusMode)
+    focusValue: FocusValue = Field(default_factory=FocusValue)
+    zoomValue: ZoomValue = Field(default_factory=ZoomValue)
+    focusSearchStep: FocusSearchStep = Field(default_factory=FocusSearchStep)
+    triggerAutofocus: TriggerAutofocus = Field(default_factory=TriggerAutofocus)
+    name: Literal["stream"] = "stream"
+    value: Literal["Stream"] = "Stream"
+    type: Literal["string"] = "string"
+    field: Literal["option"] = "option"
+
+    class Config:
+        title = "Stream (Camera Focus Control)"
+
+
+class Mode(Config):
+    """
+        What the executor does with the camera video: Brenner focus map,
+        Tenengrad measure with overlays, or Stream (Tenengrad + live camera
+        focus/zoom control). The camera video is always pulled from the camera.
+    """
+    name: Literal["Mode"] = "Mode"
+    value: Union[BrennerMode, TenengradMode, StreamMode] = Field(default_factory=BrennerMode)
+    type: Literal["object"] = "object"
+    field: Literal["dependentDropdownlist"] = "dependentDropdownlist"
+
+    class Config:
+        title = "Mode"
+        json_schema_extra = {"shortDescription": "Brenner / Tenengrad / Stream"}
+
+
+# ---------------------------------------------------------------------------
+# Executor: CameraFocus (single, camera-connected)
+# ---------------------------------------------------------------------------
+class CameraFocusInputs(Inputs):
     inputDetections: Optional[InputDetections] = None
 
 
-class CameraFocusStreamConfigs(Configs):
+class CameraFocusConfigs(Configs):
+    cameraProtocol: CameraProtocol
     cameraIp: CameraIp
     cameraUsername: CameraUsername
     cameraPassword: CameraPassword
@@ -648,30 +618,19 @@ class CameraFocusStreamConfigs(Configs):
     cameraRtspPort: CameraRtspPort
     cameraChannel: CameraChannel
     streamSubtype: StreamSubtype
-    focusMode: FocusMode
-    focusValue: FocusValue
-    zoomValue: ZoomValue
-    focusSearchStep: FocusSearchStep
-    triggerAutofocus: TriggerAutofocus
-    underExposedThreshold: UnderExposedThreshold
-    overExposedThreshold: OverExposedThreshold
-    showZebraWarnings: ShowZebraWarnings
-    showFocusPeaking: ShowFocusPeaking
-    showHUD: ShowHUD
-    showCenterMarker: ShowCenterMarker
-    gridOverlay: GridOverlay
+    mode: Mode
 
 
-class CameraFocusStreamOutputs(Outputs):
+class CameraFocusOutputs(Outputs):
     outputImage: OutputImage
     outputFocusMeasure: OutputFocusMeasure
     outputBboxFocusMeasures: OutputBboxFocusMeasures
     outputCameraStatus: OutputCameraStatus
 
 
-class CameraFocusStreamRequest(Request):
-    inputs: Optional[CameraFocusStreamInputs] = None
-    configs: CameraFocusStreamConfigs
+class CameraFocusRequest(Request):
+    inputs: Optional[CameraFocusInputs] = None
+    configs: CameraFocusConfigs
 
     class Config:
         json_schema_extra = {
@@ -679,18 +638,18 @@ class CameraFocusStreamRequest(Request):
         }
 
 
-class CameraFocusStreamResponse(Response):
-    outputs: CameraFocusStreamOutputs
+class CameraFocusResponse(Response):
+    outputs: CameraFocusOutputs
 
 
-class CameraFocusStream(Config):
-    name: Literal["CameraFocusStream"] = "CameraFocusStream"
-    value: Union[CameraFocusStreamRequest, CameraFocusStreamResponse]
+class CameraFocus(Config):
+    name: Literal["CameraFocus"] = "CameraFocus"
+    value: Union[CameraFocusRequest, CameraFocusResponse]
     type: Literal["object"] = "object"
     field: Literal["option"] = "option"
 
     class Config:
-        title = "Camera Focus Stream"
+        title = "Camera Focus"
         json_schema_extra = {
             "target": {
                 "value": 0
@@ -698,26 +657,21 @@ class CameraFocusStream(Config):
         }
 
 
-# ---------------------------------------------------------------------------
-# Task selector (three executors -> NO target, the user picks)
-# ---------------------------------------------------------------------------
 class ConfigExecutor(Config):
     """
-        Select which task to run. Brenner is a fast, parameter-free sharpness
-        check on an input image; Tenengrad is the full-featured measure with
-        exposure/focus overlays and optional per-detection scores on an input
-        image; CameraFocusStream connects directly to a Dahua camera (RTSP +
-        CGI), measures focus, and controls the camera's focus/zoom.
+        Camera-connected focus task. Connect to an IP camera, then choose the
+        Mode (Brenner / Tenengrad / Stream) to measure focus and, in Stream mode,
+        control the camera's focus and zoom.
     """
     name: Literal["ConfigExecutor"] = "ConfigExecutor"
-    value: Union[CameraFocusBrenner, CameraFocusTenengrad, CameraFocusStream]
+    value: Union[CameraFocus]
     type: Literal["executor"] = "executor"
     field: Literal["dependentDropdownlist"] = "dependentDropdownlist"
 
     class Config:
         title = "Task"
         json_schema_extra = {
-            "shortDescription": "Select Task"
+            "target": "value"
         }
 
 
