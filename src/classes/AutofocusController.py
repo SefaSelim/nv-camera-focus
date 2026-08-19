@@ -40,7 +40,7 @@ class AutofocusController:
         """
         Advance the search by one frame.
 
-        controller  : CameraController (uses get_focus_status / set_focus_zoom)
+        controller  : CameraController (uses get_status / set_focus)
         focus_score : focus measure of the frame at the current focus position
         state       : dict from initial_state() (persisted across frames)
         zoom        : absolute zoom to hold (0.0-1.0)
@@ -92,6 +92,6 @@ class AutofocusController:
             next_position = AutofocusController._clamp01(
                 state["best_position"] + state["direction"] * state["step"])
 
-        controller.set_focus_zoom(next_position, zoom)
+        controller.set_focus(next_position)
         state["position"] = next_position
         return state

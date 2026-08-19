@@ -162,6 +162,15 @@ class CameraFocus(Component):
                 camera.trigger_autofocus()
                 self.bootstrap["one_push_done"] = True
         elif self.focus_mode == "ClosedLoop":
+            # First bring zoom to the requested ZoomValue (exact via AbsoluteMove
+            # where supported); once zoom is at the target, hill-climb focus. If a
+            # focus move later disturbs zoom, re-establish it before focusing.
+            if caps.get("zoom"):
+                status = camera.get_status() or {}
+                current_zoom = status.get("zoom")
+                if current_zoom is None or abs(current_zoom - float(self.zoom_value)) > 0.05:
+                    camera.set_zoom(self.zoom_value)
+                    return  # let zoom settle; focus on a later worker iteration
             if caps.get("focus"):
                 state = AutofocusController.step(
                     camera, score, self.bootstrap.get("af_state"), None)
