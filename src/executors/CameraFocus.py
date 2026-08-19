@@ -17,6 +17,7 @@ AutofocusController. Credentials are read from the request and never logged.
 
 import os
 import sys
+import threading
 
 import numpy as np
 
@@ -135,7 +136,7 @@ class CameraFocus(Component):
             "over": self.over,
         }
 
-    def _apply_control(self, camera):
+    def _apply_control(self, camera, score):
         caps = camera.capabilities() or {}
         if self.focus_mode == "Manual":
             if self.trigger_af:
@@ -163,23 +164,34 @@ class CameraFocus(Component):
         elif self.focus_mode == "ClosedLoop":
             if caps.get("focus"):
                 state = AutofocusController.step(
-                    camera, self.focus_measure, self.bootstrap.get("af_state"), None)
+                    camera, score, self.bootstrap.get("af_state"), None)
                 self.bootstrap["af_state"] = state
 
-    def _read_status(self, camera):
-        # Reading lens status is a control-plane call; poll ~once per second and
-        # reuse the cached value in between.
-        self.bootstrap["frame_count"] = self.bootstrap.get("frame_count", 0) + 1
-        if self.bootstrap["frame_count"] % 15 == 1 or "last_status" not in self.bootstrap:
+    def _spawn_worker(self, camera):
+        """Run camera control + status reads in a background thread so the frame
+        loop (run) never blocks on slow control-plane calls. Skips if a worker
+        from a previous frame is still running."""
+        worker = self.bootstrap.get("worker")
+        if worker is not None and worker.is_alive():
+            return
+        worker = threading.Thread(target=self._camera_worker, args=(camera,), daemon=True)
+        self.bootstrap["worker"] = worker
+        worker.start()
+
+    def _camera_worker(self, camera):
+        try:
+            if self.mode == "Stream":
+                self._apply_control(camera, self.bootstrap.get("latest_score", 0.0))
             status = camera.get_status() or {}
-            self.bootstrap["last_status"] = {
+            self.bootstrap["camera_status_data"] = {
                 "protocol": self.protocol,
                 "capabilities": camera.capabilities() or {},
                 "focus": status.get("focus"),
                 "zoom": status.get("zoom"),
                 "status": status.get("status"),
             }
-        return self.bootstrap["last_status"]
+        except Exception as exc:
+            _log("worker ERROR: {}".format(exc))
 
     def _publish(self, frame):
         frame_obj = FrameImage(
@@ -214,10 +226,14 @@ class CameraFocus(Component):
                     FocusMeasures.tenengrad(frame, self.detections)
                 rendered = OverlayRenderer.render(
                     frame, gray, focus_matrix, self.focus_measure, self._overlay_options())
-                if self.mode == "Stream":
-                    self._apply_control(camera)
 
-            self.camera_status = self._read_status(camera)
+            # Camera control (Stream) and status reads run in a background worker
+            # so the frame loop never blocks on slow control-plane calls -- this
+            # keeps the preview smooth while focus/zoom adjust asynchronously.
+            self.bootstrap["latest_score"] = self.focus_measure
+            self._spawn_worker(camera)
+            self.camera_status = self.bootstrap.get("camera_status_data") or {"protocol": self.protocol}
+
             self._publish(rendered)
             return build_response(context=self)
         except Exception as exc:
