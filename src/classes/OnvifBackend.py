@@ -45,6 +45,7 @@ class OnvifBackend(CameraBackend):
         self._caps = None
         self._zoom_mode = None   # None (unknown) | "absolute" | "continuous"
         self._focus_mode = None
+        self._focus_relative = None  # True if the camera supports relative focus
 
     # --------------------------------------------------------------- connect
     def _connect(self):
@@ -82,12 +83,16 @@ class OnvifBackend(CameraBackend):
             return
         try:
             mo = self._imaging.GetMoveOptions({"VideoSourceToken": self._vsource_token})
+        except Exception:
+            return
+        try:
             mn = float(mo.Absolute.Position.Min)
             mx = float(mo.Absolute.Position.Max)
             if mx > mn:
                 self._focus_range = (mn, mx)
         except Exception:
             pass
+        self._focus_relative = getattr(mo, "Relative", None) is not None
 
     # ----------------------------------------------------------------- helpers
     @staticmethod
@@ -203,7 +208,37 @@ class OnvifBackend(CameraBackend):
         self._connect()
         if not (self._imaging and self._vsource_token):
             return False
+        # Prefer RELATIVE focus moves where available: they are the natural
+        # primitive for focus (nudge by a distance), and on cameras where the
+        # absolute/continuous focus commands disturb the zoom motor (observed on
+        # Dahua varifocal lenses) the relative move leaves zoom untouched.
+        if self._focus_relative:
+            return self._seek_relative(self._clamp01(target))
         return self._position("focus", self._clamp01(target))
+
+    def _rel_move(self, distance):
+        try:
+            self._imaging.Move({"VideoSourceToken": self._vsource_token,
+                                "Focus": {"Relative": {"Distance": distance}}})
+            return True
+        except Exception:
+            return False
+
+    def _seek_relative(self, target, tolerance=0.03, max_passes=3, settle=1.2):
+        """Move focus to an absolute 0-1 target using relative nudges
+        (distance = target - current), verifying and correcting between passes."""
+        for _ in range(max_passes):
+            current = self._read_focus()
+            if current is None:
+                return False
+            delta = target - current
+            if abs(delta) <= tolerance:
+                return True
+            if not self._rel_move(delta):
+                return False
+            time.sleep(settle)
+        current = self._read_focus()
+        return current is not None and abs(current - target) <= tolerance
 
     def close(self):
         pass
