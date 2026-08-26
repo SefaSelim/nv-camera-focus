@@ -22,7 +22,7 @@ Zoom is held fixed (supplied by the caller); only focus is driven.
 
 class AutofocusController:
     @staticmethod
-    def initial_state(step=0.02, min_step=0.002, refocus_ratio=0.75, refocus_patience=4):
+    def initial_state(step=0.02, min_step=0.002, refocus_ratio=0.88, refocus_patience=4):
         return {
             "position": None,        # focus position whose score we are evaluating
             "direction": 1,          # +1 or -1
@@ -33,7 +33,8 @@ class AutofocusController:
             "best_position": None,
             "converged": False,
             # continuous refocus: once converged, restart the search if the score
-            # stays below refocus_ratio * best for refocus_patience frames
+            # stays below refocus_ratio * best for refocus_patience frames. 0.88 is
+            # deliberately tight so the loop reacts before the image visibly softens.
             "refocus_ratio": float(refocus_ratio),
             "refocus_patience": int(refocus_patience),
             "low_count": 0,
@@ -64,7 +65,7 @@ class AutofocusController:
             if focus_score is None or focus_score != focus_score:
                 return state
             best = state.get("best_score")
-            ratio = state.get("refocus_ratio", 0.75)
+            ratio = state.get("refocus_ratio", 0.88)
             if best and focus_score < best * ratio:
                 state["low_count"] = state.get("low_count", 0) + 1
                 if state["low_count"] >= state.get("refocus_patience", 4):
