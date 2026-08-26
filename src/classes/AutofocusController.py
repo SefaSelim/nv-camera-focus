@@ -14,15 +14,17 @@ focus position that was commanded on the PREVIOUS step. The search:
   - reverses and halves the step when the score drops,
   - converges when the step falls below min_step and parks the lens at the best
     position seen,
-  - and keeps watching afterwards: if the focus score stays well below the best
-    seen (scene changed, lens defocused), the search restarts automatically.
+  - and keeps watching afterwards: the search restarts when the lens drifts away
+    from the converged position (someone focused from the camera's own UI) or
+    when the focus score stays well below the best seen (scene change).
 Zoom is held fixed (supplied by the caller); only focus is driven.
 """
 
 
 class AutofocusController:
     @staticmethod
-    def initial_state(step=0.02, min_step=0.002, refocus_ratio=0.88, refocus_patience=4):
+    def initial_state(step=0.02, min_step=0.002, refocus_ratio=0.88, refocus_patience=4,
+                      drift_tolerance=0.05):
         return {
             "position": None,        # focus position whose score we are evaluating
             "direction": 1,          # +1 or -1
@@ -40,8 +42,28 @@ class AutofocusController:
             "low_count": 0,
             "score_ema": None,       # smoothed score, so frame noise alone
                                      # cannot trigger a needless refocus
+            # how far the lens may drift from the converged position before the
+            # search restarts (catches focus changed outside the package)
+            "drift_tolerance": float(drift_tolerance),
+            "settled_position": None,   # where the lens actually came to rest
 
         }
+
+    @staticmethod
+    def _rearm(state):
+        """Reset the search so hill-climbing starts again from the lens's
+        current position."""
+        state.update({
+            "position": None,
+            "direction": 1,
+            "step": state.get("initial_step", state["step"]),
+            "best_score": None,
+            "best_position": None,
+            "converged": False,
+            "low_count": 0,
+            "score_ema": None,
+            "settled_position": None,
+        })
 
     @staticmethod
     def _clamp01(value):
@@ -65,6 +87,19 @@ class AutofocusController:
         # Converged: hold position, but keep watching the score so the loop can
         # refocus by itself when the scene changes or someone defocuses the lens.
         if state.get("converged"):
+            # Primary trigger: did the lens move behind our back? Someone
+            # focusing from the camera's own UI changes the position without
+            # necessarily lowering the focus score (the measure swings with
+            # scene content, so a score comparison alone misses this), so the
+            # position is the reliable signal.
+            reference = state.get("settled_position", state.get("best_position"))
+            if reference is not None:
+                status = controller.get_status() or {}
+                current = status.get("focus")
+                if current is not None and                         abs(current - reference) > state.get("drift_tolerance", 0.05):
+                    AutofocusController._rearm(state)
+                    return state
+
             if focus_score is None or focus_score != focus_score:
                 return state
             # Smooth the incoming score: the focus measure fluctuates from frame
@@ -78,16 +113,7 @@ class AutofocusController:
                 state["low_count"] = state.get("low_count", 0) + 1
                 if state["low_count"] >= state.get("refocus_patience", 4):
                     # sharpness dropped for a while -> search again from here
-                    state.update({
-                        "position": None,
-                        "direction": 1,
-                        "step": state.get("initial_step", state["step"]),
-                        "best_score": None,
-                        "best_position": None,
-                        "converged": False,
-                        "low_count": 0,
-                        "score_ema": None,
-                    })
+                    AutofocusController._rearm(state)
             else:
                 state["low_count"] = 0
             return state
@@ -122,9 +148,13 @@ class AutofocusController:
             state["direction"] = -state["direction"]
             state["step"] = state["step"] * 0.5
             if state["step"] < state["min_step"]:
-                # Converged: park the lens at the best position seen.
+                # Converged: park the lens at the best position seen and record
+                # where it actually settled -- the seek has its own tolerance, so
+                # the reading is the honest reference for drift detection.
                 controller.set_focus(state["best_position"])
                 state["position"] = state["best_position"]
+                settled = (controller.get_status() or {}).get("focus")
+                state["settled_position"] = state["best_position"] if settled is None else settled
                 state["converged"] = True
                 return state
             next_position = AutofocusController._clamp01(
