@@ -10,8 +10,10 @@ plain dict so the executor can persist it in bootstrap across frames.
 Model of operation (one-frame lag): the score passed in corresponds to the
 focus position that was commanded on the PREVIOUS step. The search:
   - starts at the camera's current focus, probes one step in a direction,
-  - keeps going while the score improves,
-  - reverses and halves the step when the score drops,
+  - keeps going while the score improves, and keeps the same step while a probe
+    stays within the noise band, so the search can travel far from its start,
+  - reverses and halves the step only once a probe is clearly worse (below the
+    best by more than the noise margin, or repeatedly unconvincing),
   - converges when the step falls below min_step and parks the lens at the best
     position seen,
   - and keeps watching afterwards: the search restarts when the lens drifts away
@@ -24,7 +26,7 @@ Zoom is held fixed (supplied by the caller); only focus is driven.
 class AutofocusController:
     @staticmethod
     def initial_state(step=0.02, min_step=0.002, refocus_ratio=0.88, refocus_patience=4,
-                      drift_tolerance=0.05):
+                      drift_tolerance=0.05, noise_margin=0.04, miss_patience=2):
         return {
             "position": None,        # focus position whose score we are evaluating
             "direction": 1,          # +1 or -1
@@ -46,6 +48,12 @@ class AutofocusController:
             # search restarts (catches focus changed outside the package)
             "drift_tolerance": float(drift_tolerance),
             "settled_position": None,   # where the lens actually came to rest
+            # the score swings with scene content, so a probe only counts as
+            # "worse" when it is below the best by more than noise_margin, and
+            # only after miss_patience such probes does the search turn around
+            "noise_margin": float(noise_margin),
+            "miss_patience": int(miss_patience),
+            "miss_count": 0,
 
         }
 
@@ -63,6 +71,7 @@ class AutofocusController:
             "low_count": 0,
             "score_ema": None,
             "settled_position": None,
+            "miss_count": 0,
         })
 
     @staticmethod
@@ -137,14 +146,42 @@ class AutofocusController:
             return state
 
         # The score belongs to state["position"] (the last commanded probe).
-        if focus_score > state["best_score"]:
-            # Improved: keep this position as the best, continue same direction.
+        margin = state.get("noise_margin", 0.04)
+        best = state["best_score"]
+        if focus_score > best:
+            # Improved: keep this position as the best, continue same direction
+            # with the same step so the search can travel as far as it needs to.
             state["best_score"] = focus_score
             state["best_position"] = state["position"]
+            state["miss_count"] = 0
             next_position = AutofocusController._clamp01(
                 state["position"] + state["direction"] * state["step"])
+        elif focus_score >= best * (1.0 - margin):
+            # Within the noise band: not an improvement, but not evidence that we
+            # passed the peak either. Keep probing in the same direction instead
+            # of shrinking the step on a single noisy sample.
+            state["miss_count"] = state.get("miss_count", 0) + 1
+            if state["miss_count"] < state.get("miss_patience", 2):
+                next_position = AutofocusController._clamp01(
+                    state["position"] + state["direction"] * state["step"])
+                controller.set_focus(next_position)
+                state["position"] = next_position
+                return state
+            state["miss_count"] = 0
+            state["direction"] = -state["direction"]
+            state["step"] = state["step"] * 0.5
+            if state["step"] < state["min_step"]:
+                controller.set_focus(state["best_position"])
+                state["position"] = state["best_position"]
+                settled = (controller.get_status() or {}).get("focus")
+                state["settled_position"] = state["best_position"] if settled is None else settled
+                state["converged"] = True
+                return state
+            next_position = AutofocusController._clamp01(
+                state["best_position"] + state["direction"] * state["step"])
         else:
-            # Worse: reverse direction and shrink the step, search around the best.
+            # Clearly worse: we passed the peak -- reverse and refine.
+            state["miss_count"] = 0
             state["direction"] = -state["direction"]
             state["step"] = state["step"] * 0.5
             if state["step"] < state["min_step"]:
