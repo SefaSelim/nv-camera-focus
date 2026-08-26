@@ -18,6 +18,7 @@ AutofocusController. Credentials are read from the request and never logged.
 import os
 import sys
 import threading
+import time
 
 import numpy as np
 
@@ -190,10 +191,35 @@ class CameraFocus(Component):
         self.bootstrap["worker"] = worker
         worker.start()
 
+    def _wait_for_fresh_score(self, frames=2, timeout=4.0):
+        """Block (in the worker thread) until run() has measured `frames` new
+        frames, so the next control decision uses a score that belongs to the
+        focus position we just commanded rather than one captured mid-move."""
+        start = self.bootstrap.get("frame_seq", 0)
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.bootstrap.get("frame_seq", 0) - start >= frames:
+                return True
+            time.sleep(0.05)
+        return False
+
     def _camera_worker(self, camera):
         try:
             if self.mode == "Stream":
+                before = self.bootstrap.get("frame_seq", 0)
                 self._apply_control(camera, self.bootstrap.get("latest_score", 0.0))
+                if self.focus_mode == "ClosedLoop":
+                    # The lens has settled by the time control returns; wait for
+                    # frames measured AFTER the move so the hill-climb judges the
+                    # new position and not a stale one.
+                    self._wait_for_fresh_score()
+                    state = self.bootstrap.get("af_state") or {}
+                    self.bootstrap["af_log"] = self.bootstrap.get("af_log", 0) + 1
+                    if self.bootstrap["af_log"] % 10 == 1:
+                        _log("closed-loop: score=%.0f pos=%s best=%s converged=%s" % (
+                            self.bootstrap.get("latest_score", 0.0),
+                            state.get("position"), state.get("best_score"),
+                            state.get("converged")))
             status = camera.get_status() or {}
             self.bootstrap["camera_status_data"] = {
                 "protocol": "Onvif",
@@ -243,6 +269,7 @@ class CameraFocus(Component):
             # so the frame loop never blocks on slow control-plane calls -- this
             # keeps the preview smooth while focus/zoom adjust asynchronously.
             self.bootstrap["latest_score"] = self.focus_measure
+            self.bootstrap["frame_seq"] = self.bootstrap.get("frame_seq", 0) + 1
             self._spawn_worker(camera)
             self.camera_status = self.bootstrap.get("camera_status_data") or {"protocol": "Onvif"}
 
