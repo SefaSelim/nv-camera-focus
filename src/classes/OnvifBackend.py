@@ -1,5 +1,10 @@
 """
-OnvifBackend — vendor-neutral camera control over ONVIF (onvif-zeep).
+OnvifBackend — vendor-neutral camera control over ONVIF.
+
+Works with either ONVIF package that provides the "onvif" module: onvif-zeep
+(synchronous) or onvif-zeep-async (asyncio-based, shipped in the platform's
+opencv image). The async client is driven from a dedicated background event loop
+so this backend always presents a synchronous interface.
 
 Video URI via the Media service, zoom via the PTZ service, focus via the Imaging
 service. Focus/zoom are exposed to the rest of the package normalized 0.0-1.0.
@@ -16,14 +21,69 @@ Every ONVIF call is wrapped in try/except; failures return None/False instead of
 raising. Credentials are kept private and never logged.
 """
 
+import asyncio
+import inspect
+import threading
 import time
 
 from components.CameraFocus.src.classes.CameraBackend import CameraBackend
 
 try:
     from onvif import ONVIFCamera
-except Exception:  # onvif-zeep not installed in this runtime
+except Exception:  # no onvif package installed in this runtime
     ONVIFCamera = None
+
+# Two ONVIF packages share the "onvif" module name: onvif-zeep (synchronous) and
+# onvif-zeep-async (asyncio-based, what the platform image ships). Detect which
+# one is installed and, for the async one, drive it from a dedicated background
+# event loop so this backend keeps a synchronous interface either way.
+IS_ASYNC = ONVIFCamera is not None and asyncio.iscoroutinefunction(
+    getattr(ONVIFCamera, "update_xaddrs", None))
+
+
+class _AsyncLoop:
+    """A single background asyncio loop used to run the async ONVIF client."""
+    _loop = None
+    _lock = threading.Lock()
+
+    @classmethod
+    def loop(cls):
+        with cls._lock:
+            if cls._loop is None:
+                cls._loop = asyncio.new_event_loop()
+                threading.Thread(target=cls._loop.run_forever, daemon=True).start()
+        return cls._loop
+
+    @classmethod
+    def run(cls, awaitable, timeout=20.0):
+        async def _wrap():
+            return await awaitable
+        return asyncio.run_coroutine_threadsafe(_wrap(), cls.loop()).result(timeout)
+
+
+def _resolve(value, timeout=20.0):
+    """Return value, awaiting it on the background loop when it is awaitable, so
+    the same call sites work with both the sync and the async onvif package."""
+    if inspect.isawaitable(value):
+        return _AsyncLoop.run(value, timeout)
+    return value
+
+
+class _SyncService:
+    """Wraps an ONVIF service so its (possibly async) methods can be called
+    synchronously; non-callable attributes pass straight through."""
+
+    def __init__(self, service):
+        self._service = service
+
+    def __getattr__(self, name):
+        attr = getattr(self._service, name)
+        if not callable(attr):
+            return attr
+
+        def call(*args, **kwargs):
+            return _resolve(attr(*args, **kwargs))
+        return call
 
 
 class OnvifBackend(CameraBackend):
@@ -54,8 +114,15 @@ class OnvifBackend(CameraBackend):
         if ONVIFCamera is None:
             return False
         try:
-            cam = ONVIFCamera(self.ip, self.port, self._username, self._password)
-            media = cam.create_media_service()
+            if IS_ASYNC:
+                async def _build():
+                    client = ONVIFCamera(self.ip, self.port, self._username, self._password)
+                    await client.update_xaddrs()
+                    return client
+                cam = _AsyncLoop.run(_build())
+            else:
+                cam = ONVIFCamera(self.ip, self.port, self._username, self._password)
+            media = _SyncService(_resolve(cam.create_media_service()))
             profile = media.GetProfiles()[0]
             self._profile_token = profile.token
             try:
@@ -65,11 +132,11 @@ class OnvifBackend(CameraBackend):
             self._cam = cam
             self._media = media
             try:
-                self._ptz = cam.create_ptz_service()
+                self._ptz = _SyncService(_resolve(cam.create_ptz_service()))
             except Exception:
                 self._ptz = None
             try:
-                self._imaging = cam.create_imaging_service()
+                self._imaging = _SyncService(_resolve(cam.create_imaging_service()))
             except Exception:
                 self._imaging = None
             self._detect_focus_range()
@@ -241,7 +308,19 @@ class OnvifBackend(CameraBackend):
         return current is not None and abs(current - target) <= tolerance
 
     def close(self):
-        pass
+        """Close the ONVIF client. The async client holds an aiohttp session that
+        logs 'Unclosed client session' if it is dropped without closing."""
+        cam, self._cam = self._cam, None
+        self._media = self._ptz = self._imaging = None
+        if cam is None:
+            return
+        closer = getattr(cam, "close", None)
+        if closer is None:
+            return
+        try:
+            _resolve(closer())
+        except Exception:
+            pass
 
     # --------------------------------------------- absolute / continuous moves
     def _abs_move(self, kind, target):
