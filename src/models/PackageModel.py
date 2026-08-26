@@ -9,8 +9,11 @@ from sdks.novavision.src.base.model import (
 
 
 class InputDetections(Input):
+    # Optional input: while nothing is connected (or the upstream node has not
+    # produced data yet) the platform sends this input with only name/type, so
+    # value must tolerate being absent.
     name: Literal["inputDetections"] = "inputDetections"
-    value: Union[List[Detection], Detection]
+    value: Optional[Union[List[Detection], Detection]] = None
     type: str = "object"
 
     class Config:

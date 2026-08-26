@@ -51,7 +51,7 @@ class CameraFocus(Component):
         super().__init__(request, bootstrap)
         self.request.model = PackageModel(**(self.request.data))
 
-        self.detections = self.request.get_param("inputDetections")
+        self.detections = self._param("inputDetections", None)
 
         # camera connection (ONVIF)
         self.camera_ip = self._param("CameraIp", "")
@@ -86,7 +86,17 @@ class CameraFocus(Component):
         self.camera_status = {}
 
     def _param(self, name, default):
-        value = self.request.get_param(name)
+        """Read a request parameter, falling back to `default`.
+
+        get_param raises KeyError('value') when a parameter is declared in the
+        node config but carries no value yet -- which is the normal state of an
+        optional input such as inputDetections before anything is connected or
+        while the upstream node has not produced data. That must not abort the
+        executor, so any lookup failure falls back to the default."""
+        try:
+            value = self.request.get_param(name)
+        except Exception:
+            return default
         return default if value is None else value
 
     @staticmethod
