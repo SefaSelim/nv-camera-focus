@@ -123,7 +123,11 @@ class OnvifBackend(CameraBackend):
             else:
                 cam = ONVIFCamera(self.ip, self.port, self._username, self._password)
             media = _SyncService(_resolve(cam.create_media_service()))
-            profile = media.GetProfiles()[0]
+            profiles = media.GetProfiles()
+            # StreamSubtype selects the media profile: 0 = main (high res),
+            # 1 = sub (lighter, smoother preview). Fall back to the first one.
+            index = self.subtype if 0 <= self.subtype < len(profiles) else 0
+            profile = profiles[index]
             self._profile_token = profile.token
             try:
                 self._vsource_token = profile.VideoSourceConfiguration.SourceToken

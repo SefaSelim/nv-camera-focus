@@ -8,9 +8,6 @@ from sdks.novavision.src.base.model import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Inputs
-# ---------------------------------------------------------------------------
 class InputDetections(Input):
     name: Literal["inputDetections"] = "inputDetections"
     value: Union[List[Detection], Detection]
@@ -20,9 +17,6 @@ class InputDetections(Input):
         title = "Detections"
 
 
-# ---------------------------------------------------------------------------
-# Outputs
-# ---------------------------------------------------------------------------
 class OutputImage(Output):
     name: Literal["outputImage"] = "outputImage"
     value: Union[List[Image], Image]
@@ -259,7 +253,56 @@ class GridOverlay(Config):
 # ---------------------------------------------------------------------------
 # Control parameters (Stream mode)
 # ---------------------------------------------------------------------------
+class FocusValue(Config):
+    """
+        Absolute focus position (0.0-1.0) written to the camera. Only used in
+        Manual focus mode; 0.0 and 1.0 are the two ends of the lens travel.
+    """
+    name: Literal["FocusValue"] = "FocusValue"
+    value: float = Field(ge=0.0, le=1.0, default=0.5)
+    type: Literal["number"] = "number"
+    field: Literal["textInput"] = "textInput"
+    placeHolder: Literal["[0.0, 1.0]"] = "[0.0, 1.0]"
+
+    class Config:
+        title = "Focus Value"
+        json_schema_extra = {"shortDescription": "Manual focus (0-1)"}
+
+
+class FocusSearchStep(Config):
+    """
+        Step size (0.0-1.0) used by the closed-loop autofocus hill-climb. Larger
+        steps converge faster but overshoot; smaller steps are more precise.
+    """
+    name: Literal["FocusSearchStep"] = "FocusSearchStep"
+    value: float = Field(ge=0.0, le=1.0, default=0.02)
+    type: Literal["number"] = "number"
+    field: Literal["textInput"] = "textInput"
+    placeHolder: Literal["[0.0, 1.0]"] = "[0.0, 1.0]"
+
+    class Config:
+        title = "Focus Search Step"
+        json_schema_extra = {"shortDescription": "Closed-loop step size"}
+
+
+class ZoomValue(Config):
+    """
+        Absolute zoom position (0.0-1.0) written to the camera in every focus
+        mode. 0.0 is fully wide, 1.0 fully tele.
+    """
+    name: Literal["ZoomValue"] = "ZoomValue"
+    value: float = Field(ge=0.0, le=1.0, default=0.0)
+    type: Literal["number"] = "number"
+    field: Literal["textInput"] = "textInput"
+    placeHolder: Literal["[0.0, 1.0]"] = "[0.0, 1.0]"
+
+    class Config:
+        title = "Zoom Value"
+        json_schema_extra = {"shortDescription": "Zoom (0-1)"}
+
+
 class FocusModeManual(Config):
+    focusValue: FocusValue = Field(default_factory=FocusValue)
     name: Literal["manual"] = "manual"
     value: Literal["Manual"] = "Manual"
     type: Literal["string"] = "string"
@@ -280,6 +323,7 @@ class FocusModeOnePush(Config):
 
 
 class FocusModeClosedLoop(Config):
+    focusSearchStep: FocusSearchStep = Field(default_factory=FocusSearchStep)
     name: Literal["closedLoop"] = "closedLoop"
     value: Literal["ClosedLoop"] = "ClosedLoop"
     type: Literal["string"] = "string"
@@ -291,128 +335,31 @@ class FocusModeClosedLoop(Config):
 
 class FocusMode(Config):
     """
-        How focus is driven in Stream mode. Manual writes FocusValue/ZoomValue
-        (or fires one-push if TriggerAutofocus is enabled); OnePushAutofocus
-        fires the camera's autofocus once; ClosedLoop continuously hill-climbs
-        the Tenengrad focus measure. Manual and ClosedLoop first disable the
-        camera's own continuous autofocus so our commands hold.
+        How focus is driven in Stream mode. Manual writes the Focus Value you
+        enter. One-Push Autofocus fires the camera's own autofocus once.
+        Closed-Loop Autofocus continuously hill-climbs the Tenengrad focus
+        measure and refocuses by itself when sharpness drops. Manual and
+        Closed-Loop disable the camera's own continuous autofocus first so our
+        commands hold. Zoom Value applies in all three modes.
     """
     name: Literal["FocusMode"] = "FocusMode"
     value: Union[FocusModeManual, FocusModeOnePush, FocusModeClosedLoop] = Field(
         default_factory=FocusModeManual)
     type: Literal["object"] = "object"
-    field: Literal["dropdownlist"] = "dropdownlist"
+    field: Literal["dependentDropdownlist"] = "dependentDropdownlist"
 
     class Config:
         title = "Focus Mode"
         json_schema_extra = {"shortDescription": "Focus control mode"}
 
 
-class FocusValue(Config):
-    """
-        Target absolute focus position (0.0-1.0) written to the camera in Manual
-        mode.
-    """
-    name: Literal["FocusValue"] = "FocusValue"
-    value: float = Field(ge=0.0, le=1.0, default=0.5)
-    type: Literal["number"] = "number"
-    field: Literal["textInput"] = "textInput"
-    placeHolder: Literal["[0.0, 1.0]"] = "[0.0, 1.0]"
-
-    class Config:
-        title = "Focus Value"
-        json_schema_extra = {"shortDescription": "Manual focus (0-1)"}
-
-
-class ZoomValue(Config):
-    """
-        Target absolute zoom position (0.0-1.0) written to the camera in Manual
-        mode. 0.0 is fully wide, 1.0 fully tele.
-    """
-    name: Literal["ZoomValue"] = "ZoomValue"
-    value: float = Field(ge=0.0, le=1.0, default=0.0)
-    type: Literal["number"] = "number"
-    field: Literal["textInput"] = "textInput"
-    placeHolder: Literal["[0.0, 1.0]"] = "[0.0, 1.0]"
-
-    class Config:
-        title = "Zoom Value"
-        json_schema_extra = {"shortDescription": "Manual zoom (0-1)"}
-
-
-class FocusSearchStep(Config):
-    """
-        Step size (0.0-1.0) used by the closed-loop autofocus hill-climb. Larger
-        converges faster but overshoots; smaller is more precise.
-    """
-    name: Literal["FocusSearchStep"] = "FocusSearchStep"
-    value: float = Field(ge=0.0, le=1.0, default=0.02)
-    type: Literal["number"] = "number"
-    field: Literal["textInput"] = "textInput"
-    placeHolder: Literal["[0.0, 1.0]"] = "[0.0, 1.0]"
-
-    class Config:
-        title = "Focus Search Step"
-        json_schema_extra = {"shortDescription": "Closed-loop step size"}
-
-
-class TriggerAutofocus(Config):
-    """
-        In Manual mode, when Enabled, fire a one-push autofocus this run instead
-        of writing FocusValue/ZoomValue. Ignored in the other focus modes.
-    """
-    name: Literal["TriggerAutofocus"] = "TriggerAutofocus"
-    value: Union[OptionEnable, OptionDisable] = Field(default_factory=OptionDisable)
-    type: Literal["object"] = "object"
-    field: Literal["dropdownlist"] = "dropdownlist"
-
-    class Config:
-        title = "Trigger Autofocus"
-        json_schema_extra = {"shortDescription": "Fire one-push AF (Manual)"}
-
-
 # ---------------------------------------------------------------------------
 # Camera connection (shared, always shown)
 # ---------------------------------------------------------------------------
-class ProtocolOnvif(Config):
-    name: Literal["onvif"] = "onvif"
-    value: Literal["Onvif"] = "Onvif"
-    type: Literal["string"] = "string"
-    field: Literal["option"] = "option"
-
-    class Config:
-        title = "ONVIF (multi-brand)"
-
-
-class ProtocolDahuaCgi(Config):
-    name: Literal["dahuaCgi"] = "dahuaCgi"
-    value: Literal["DahuaCgi"] = "DahuaCgi"
-    type: Literal["string"] = "string"
-    field: Literal["option"] = "option"
-
-    class Config:
-        title = "Dahua HTTP-CGI"
-
-
-class CameraProtocol(Config):
-    """
-        Camera control protocol. ONVIF is vendor-neutral and works across many
-        IP-camera brands (video, focus, zoom); Dahua HTTP-CGI is Dahua-specific.
-    """
-    name: Literal["CameraProtocol"] = "CameraProtocol"
-    value: Union[ProtocolOnvif, ProtocolDahuaCgi] = Field(default_factory=ProtocolOnvif)
-    type: Literal["object"] = "object"
-    field: Literal["dropdownlist"] = "dropdownlist"
-
-    class Config:
-        title = "Camera Protocol"
-        json_schema_extra = {"shortDescription": "ONVIF (multi-brand) / Dahua CGI"}
-
-
 class CameraIp(Config):
     """
-        IPv4 address of the camera. The executor connects to it for the video
-        stream (RTSP) and for focus/zoom control.
+        IPv4 address of the camera. The executor talks ONVIF to it to discover
+        the video stream and to control focus and zoom.
     """
     name: Literal["CameraIp"] = "CameraIp"
     value: str = ""
@@ -426,8 +373,8 @@ class CameraIp(Config):
 
 class CameraUsername(Config):
     """
-        Username for the camera's authentication (usually 'admin'; for ONVIF an
-        ONVIF-enabled user).
+        Username for the camera's ONVIF authentication (usually 'admin', or a
+        dedicated ONVIF user created on the camera).
     """
     name: Literal["CameraUsername"] = "CameraUsername"
     value: str = "admin"
@@ -457,8 +404,8 @@ class CameraPassword(Config):
 
 class CameraHttpPort(Config):
     """
-        HTTP port for camera control: the ONVIF service port for the ONVIF
-        protocol, or the CGI port for Dahua. Usually 80.
+        The camera's ONVIF service port. Usually 80; some cameras expose ONVIF
+        on a different port (e.g. 8000).
     """
     name: Literal["CameraHttpPort"] = "CameraHttpPort"
     value: int = Field(ge=1, le=65535, default=80)
@@ -466,37 +413,8 @@ class CameraHttpPort(Config):
     field: Literal["textInput"] = "textInput"
 
     class Config:
-        title = "Camera HTTP/ONVIF Port"
-        json_schema_extra = {"shortDescription": "HTTP/ONVIF port"}
-
-
-class CameraRtspPort(Config):
-    """
-        RTSP port for the camera video stream (used by the Dahua backend and as
-        a fallback). Usually 554.
-    """
-    name: Literal["CameraRtspPort"] = "CameraRtspPort"
-    value: int = Field(ge=1, le=65535, default=554)
-    type: Literal["number"] = "number"
-    field: Literal["textInput"] = "textInput"
-
-    class Config:
-        title = "Camera RTSP Port"
-        json_schema_extra = {"shortDescription": "RTSP port"}
-
-
-class CameraChannel(Config):
-    """
-        Camera channel index for the RTSP URL / control. Usually 1.
-    """
-    name: Literal["CameraChannel"] = "CameraChannel"
-    value: int = Field(ge=1, le=64, default=1)
-    type: Literal["number"] = "number"
-    field: Literal["textInput"] = "textInput"
-
-    class Config:
-        title = "Camera Channel"
-        json_schema_extra = {"shortDescription": "Channel index"}
+        title = "Camera ONVIF Port"
+        json_schema_extra = {"shortDescription": "ONVIF service port"}
 
 
 class SubtypeMain(Config):
@@ -521,8 +439,9 @@ class SubtypeSub(Config):
 
 class StreamSubtype(Config):
     """
-        Which stream to pull: Main is higher resolution, Sub is lighter and
-        smoother for live preview. Affects only the pulled frame, not control.
+        Which ONVIF media profile to pull: Main is the first (high resolution)
+        profile, Sub the second (lower resolution, lighter and smoother for live
+        preview). Affects only the video, not the focus/zoom control.
     """
     name: Literal["StreamSubtype"] = "StreamSubtype"
     value: Union[SubtypeMain, SubtypeSub] = Field(default_factory=SubtypeMain)
@@ -572,11 +491,8 @@ class StreamMode(Config):
     showHUD: ShowHUD = Field(default_factory=ShowHUD)
     showCenterMarker: ShowCenterMarker = Field(default_factory=ShowCenterMarker)
     gridOverlay: GridOverlay = Field(default_factory=GridOverlay)
-    focusMode: FocusMode = Field(default_factory=FocusMode)
-    focusValue: FocusValue = Field(default_factory=FocusValue)
     zoomValue: ZoomValue = Field(default_factory=ZoomValue)
-    focusSearchStep: FocusSearchStep = Field(default_factory=FocusSearchStep)
-    triggerAutofocus: TriggerAutofocus = Field(default_factory=TriggerAutofocus)
+    focusMode: FocusMode = Field(default_factory=FocusMode)
     name: Literal["stream"] = "stream"
     value: Literal["Stream"] = "Stream"
     type: Literal["string"] = "string"
@@ -610,13 +526,10 @@ class CameraFocusInputs(Inputs):
 
 
 class CameraFocusConfigs(Configs):
-    cameraProtocol: CameraProtocol
     cameraIp: CameraIp
     cameraUsername: CameraUsername
     cameraPassword: CameraPassword
     cameraHttpPort: CameraHttpPort
-    cameraRtspPort: CameraRtspPort
-    cameraChannel: CameraChannel
     streamSubtype: StreamSubtype
     mode: Mode
 

@@ -4,9 +4,9 @@ A NovaVision capsule package that connects to an IP camera, measures its focus,
 and (optionally) controls the camera's focus and zoom.
 
 It is a single, camera-connected executor. A **Mode** dropdown selects the
-behaviour; the camera connection is entered once and shared across modes. Camera
-control is **vendor-neutral over ONVIF** by default, with a Dahua HTTP-CGI
-backend available as an option.
+behaviour; the camera connection is entered once and shared across modes. Video
+and control both run over **ONVIF**, the vendor-neutral standard supported by
+most IP cameras, so the same package works across brands.
 
 ## Modes
 
@@ -23,17 +23,19 @@ and the lens focus/zoom).
 
 ## Camera connection (shared parameters)
 
-- **Camera Protocol** — `ONVIF` (default, multi-brand) or `Dahua HTTP-CGI`.
 - **Camera IP**, **Camera Username**, **Camera Password** (plain text field so it
   is editable; the executor never logs it).
-- **Camera HTTP/ONVIF Port** (default 80), **Camera RTSP Port** (default 554),
-  **Camera Channel** (default 1), **Stream Subtype** (Main / Sub — use **Sub**
-  for the smoothest live preview).
+- **Camera ONVIF Port** (default 80).
+- **Stream Subtype** — selects the ONVIF media profile: **Main** (first profile,
+  high resolution) or **Sub** (second profile, lighter). Use **Sub** for the
+  smoothest live preview.
 
-**Prerequisite:** the executor's runtime must be able to reach the camera IP on
-the network (the camera and the runtime on the same LAN, or a routable path). For
-the ONVIF protocol the runtime image must have `onvif-zeep` installed (like
-`opencv-python-headless`).
+The RTSP stream URL is discovered from the camera over ONVIF, so no stream path,
+RTSP port or channel has to be configured.
+
+**Prerequisites:** the executor's runtime must reach the camera IP on the network
+(same LAN or a routable path), and the runtime image must provide an ONVIF client
+package — either `onvif-zeep` or `onvif-zeep-async`; the backend supports both.
 
 ### Enabling ONVIF on the camera
 
@@ -43,12 +45,18 @@ the ONVIF authentication. Then use that username/password here.
 
 ## Stream mode — focus/zoom control
 
-**Focus Mode:**
-- **Manual** — writes the `Focus Value` / `Zoom Value` (0.0–1.0) to the camera.
-  If `Trigger Autofocus` is enabled it fires a one-push autofocus instead.
-- **One-Push Autofocus** — fires the camera's own autofocus once.
-- **Closed-Loop Autofocus** — continuously hill-climbs the Tenengrad focus
-  measure to find the sharpest focus, without relying on the camera's autofocus.
+**Zoom Value** (0.0–1.0) applies in every focus mode. **Focus Mode** then decides
+how focus is driven, and shows only the parameters that mode needs:
+
+- **Manual** — you enter a **Focus Value** (0.0–1.0) and it is written to the
+  camera. Zoom is applied first, then focus, because a zoom move shifts focus on
+  a varifocal lens.
+- **One-Push Autofocus** — fires the camera's own autofocus once (no extra
+  parameters).
+- **Closed-Loop Autofocus** — the package focuses by itself: it hill-climbs the
+  Tenengrad focus measure with a configurable **Focus Search Step**, and keeps
+  watching afterwards, restarting the search automatically when sharpness drops
+  (scene change or a disturbed lens).
 
 The connected camera's capabilities (zoom / focus / autofocus) are auto-detected
 and reported in `outputCameraStatus`; controls that a camera does not support are
@@ -56,13 +64,13 @@ skipped gracefully.
 
 ### How positioning works
 
-- **Zoom** uses ONVIF `AbsoluteMove` where supported (exact and fast). If a
-  camera exposes only continuous zoom, a timed continuous-move fallback is used.
-- **Focus** tries ONVIF absolute `Move` first (portable); if the camera's lens
-  does not track absolute focus, it falls back to a timed continuous-move seek.
-- Absolute-positioning accuracy and speed depend on the camera. On a varifocal
-  lens, focus and zoom can be coupled (changing one shifts the other); Manual
-  mode sets focus first and then (re)asserts zoom so the zoom target holds.
+- **Zoom** uses ONVIF `AbsoluteMove` where supported (exact and fast); a timed
+  continuous-move fallback covers cameras that only expose continuous zoom.
+- **Focus** prefers ONVIF **relative** moves (nudge by a distance), which are
+  precise and leave zoom untouched. Absolute and timed-continuous seeks are used
+  as fallbacks when a camera does not advertise relative focus.
+- Accuracy and speed depend on the camera. On a varifocal lens a zoom move shifts
+  focus, so zoom is always applied before focus.
 
 ## Local test client
 
@@ -88,7 +96,7 @@ capabilities), and writes the output image. The password is never printed.
   runs the selected mode, and (in Stream mode) drives the camera.
 - `src/classes/` — pure logic:
   - `RtspReader` (background-thread RTSP reader, keeps the latest frame),
-  - `CameraBackend` (control interface) with `OnvifBackend` and `DahuaCgiBackend`,
+  - `CameraBackend` (control interface) implemented by `OnvifBackend`,
   - `CameraController` (facade: reader + backend),
   - `FocusMeasures` (Brenner / Tenengrad), `Visualization`, `OverlayRenderer`,
     `AutofocusController` (closed-loop hill-climb), `InputGate`.
@@ -96,4 +104,5 @@ capabilities), and writes the output image. The password is never printed.
 
 ## Dependencies
 
-`sdk`, `opencv-python-headless`, `numpy`, `requests`, `onvif-zeep`.
+`sdk`, `opencv-python-headless`, `numpy`, `requests`, and an ONVIF client
+(`onvif-zeep` or `onvif-zeep-async`).

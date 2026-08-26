@@ -1,7 +1,7 @@
 """
 CameraFocus executor — single, camera-connected focus task.
 
-Connects to an IP camera (ONVIF by default, or Dahua HTTP-CGI), pulls the live
+Connects to any ONVIF-capable IP camera, pulls the live
 RTSP frame, and runs one of three modes selected by the Mode dropdown:
   - Brenner   : Brenner focus map + overall focus measure.
   - Tenengrad : Tenengrad measure with overlays + per-detection measures.
@@ -33,7 +33,6 @@ from components.CameraFocus.src.classes.FocusMeasures import FocusMeasures
 from components.CameraFocus.src.classes.Visualization import Visualization
 from components.CameraFocus.src.classes import OverlayRenderer
 from components.CameraFocus.src.classes.CameraController import CameraController
-from components.CameraFocus.src.classes.DahuaCgiBackend import DahuaCgiBackend
 from components.CameraFocus.src.classes.OnvifBackend import OnvifBackend
 from components.CameraFocus.src.classes.AutofocusController import AutofocusController
 
@@ -54,14 +53,11 @@ class CameraFocus(Component):
 
         self.detections = self.request.get_param("inputDetections")
 
-        # camera connection
-        self.protocol = self._param("CameraProtocol", "Onvif")
+        # camera connection (ONVIF)
         self.camera_ip = self._param("CameraIp", "")
         self.camera_user = self._param("CameraUsername", "admin")
         self.camera_pass = self._param("CameraPassword", "")
-        self.http_port = self._param("CameraHttpPort", 80)
-        self.rtsp_port = self._param("CameraRtspPort", 554)
-        self.channel = self._param("CameraChannel", 1)
+        self.onvif_port = self._param("CameraHttpPort", 80)
         self.subtype = self._param("StreamSubtype", 0)
 
         # mode + mode sub-params (present only for the selected mode)
@@ -82,7 +78,6 @@ class CameraFocus(Component):
         self.focus_value = self._param("FocusValue", 0.5)
         self.zoom_value = self._param("ZoomValue", 0.0)
         self.focus_step = self._param("FocusSearchStep", 0.02)
-        self.trigger_af = self._param("TriggerAutofocus", False)
 
         # outputs
         self.image = None
@@ -101,23 +96,15 @@ class CameraFocus(Component):
         return {}
 
     def _make_backend(self):
-        if str(self.protocol) == "DahuaCgi":
-            return DahuaCgiBackend(self.camera_ip, self.camera_user, self.camera_pass,
-                                   http_port=self.http_port, rtsp_port=self.rtsp_port,
-                                   channel=self.channel, subtype=self.subtype)
         return OnvifBackend(self.camera_ip, self.camera_user, self.camera_pass,
-                            port=self.http_port, subtype=self.subtype)
+                            port=self.onvif_port, subtype=self.subtype)
 
     def _get_camera(self):
         camera = self.bootstrap.get("camera")
         if camera is None:
-            backend = self._make_backend()
-            camera = CameraController(self.camera_ip, self.camera_user, self.camera_pass,
-                                      http_port=self.http_port, rtsp_port=self.rtsp_port,
-                                      channel=self.channel, subtype=self.subtype,
-                                      backend=backend)
+            camera = CameraController(backend=self._make_backend())
             opened = camera.open_stream()
-            _log("connected via {}; stream opened={}".format(self.protocol, opened))
+            _log("connected over ONVIF; stream opened={}".format(opened))
             if self.mode == "Stream" and self.focus_mode in ("Manual", "ClosedLoop"):
                 camera.set_autofocus(False)
             self.bootstrap["camera"] = camera
@@ -139,25 +126,28 @@ class CameraFocus(Component):
     def _apply_control(self, camera, score):
         caps = camera.capabilities() or {}
         if self.focus_mode == "Manual":
-            if self.trigger_af:
-                if not self.bootstrap.get("manual_af_done"):
-                    camera.trigger_autofocus()
-                    self.bootstrap["manual_af_done"] = True
-                return
-            # Move each axis only when its target changes. Order matters: on some
-            # cameras a focus move (continuous) resets zoom, so focus is set
-            # FIRST and zoom is (re)asserted afterwards whenever focus moved.
+            # Move each axis only when its target changes. Zoom goes FIRST: on a
+            # varifocal lens a zoom move shifts focus, so focus is applied after
+            # the framing is set (and re-applied whenever zoom moved). Focus uses
+            # ONVIF relative moves, which do not disturb zoom.
             focus_t = round(float(self.focus_value), 3)
             zoom_t = round(float(self.zoom_value), 3)
-            focus_changed = self.bootstrap.get("last_focus") != focus_t
             zoom_changed = self.bootstrap.get("last_zoom") != zoom_t
-            if caps.get("focus") and focus_changed:
-                camera.set_focus(self.focus_value)
-                self.bootstrap["last_focus"] = focus_t
-            if caps.get("zoom") and (zoom_changed or focus_changed):
+            focus_changed = self.bootstrap.get("last_focus") != focus_t
+            if caps.get("zoom") and zoom_changed:
                 camera.set_zoom(self.zoom_value)
                 self.bootstrap["last_zoom"] = zoom_t
+            if caps.get("focus") and (focus_changed or zoom_changed):
+                camera.set_focus(self.focus_value)
+                self.bootstrap["last_focus"] = focus_t
         elif self.focus_mode == "OnePushAutofocus":
+            # Zoom applies in every focus mode; set it before focusing so the
+            # camera autofocuses at the framing the user asked for.
+            zoom_t = round(float(self.zoom_value), 3)
+            if caps.get("zoom") and self.bootstrap.get("last_zoom") != zoom_t:
+                camera.set_zoom(self.zoom_value)
+                self.bootstrap["last_zoom"] = zoom_t
+                self.bootstrap["one_push_done"] = False
             if not self.bootstrap.get("one_push_done"):
                 camera.trigger_autofocus()
                 self.bootstrap["one_push_done"] = True
@@ -193,7 +183,7 @@ class CameraFocus(Component):
                 self._apply_control(camera, self.bootstrap.get("latest_score", 0.0))
             status = camera.get_status() or {}
             self.bootstrap["camera_status_data"] = {
-                "protocol": self.protocol,
+                "protocol": "Onvif",
                 "capabilities": camera.capabilities() or {},
                 "focus": status.get("focus"),
                 "zoom": status.get("zoom"),
@@ -214,14 +204,14 @@ class CameraFocus(Component):
             if not self.camera_ip or not self.camera_pass:
                 _log("missing camera credentials (ip set={}, pass set={})".format(
                     bool(self.camera_ip), bool(self.camera_pass)))
-                self.camera_status = {"protocol": self.protocol, "status": "MissingCredentials"}
+                self.camera_status = {"protocol": "Onvif", "status": "MissingCredentials"}
                 self._publish(np.zeros((16, 16, 3), dtype=np.uint8))
                 return build_response(context=self)
 
             camera = self._get_camera()
             frame = camera.read_frame()
             if frame is None:
-                self.camera_status = {"protocol": self.protocol, "status": "NoFrame",
+                self.camera_status = {"protocol": "Onvif", "status": "NoFrame",
                                       "capabilities": camera.capabilities() or {}}
                 self._publish(np.zeros((16, 16, 3), dtype=np.uint8))
                 return build_response(context=self)
@@ -241,7 +231,7 @@ class CameraFocus(Component):
             # keeps the preview smooth while focus/zoom adjust asynchronously.
             self.bootstrap["latest_score"] = self.focus_measure
             self._spawn_worker(camera)
-            self.camera_status = self.bootstrap.get("camera_status_data") or {"protocol": self.protocol}
+            self.camera_status = self.bootstrap.get("camera_status_data") or {"protocol": "Onvif"}
 
             self._publish(rendered)
             return build_response(context=self)

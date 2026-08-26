@@ -13,9 +13,9 @@ Usage:
     python client.py --camera-ip 10.20.30.139 --camera-password PASS --mode stream \
         --focus-mode Manual --zoom 0.4
 
-If --camera-ip is given the real camera backend is used (ONVIF by default, or
---protocol dahua); otherwise a mock camera yields a synthetic frame so the modes
-can be exercised offline. The password is never printed.
+If --camera-ip is given the real ONVIF backend is used; otherwise a mock camera
+yields a synthetic frame so the modes can be exercised offline. The password is
+never printed.
 """
 
 import argparse
@@ -203,19 +203,14 @@ def _cfg(name, value):
 
 
 def build_payload(args):
-    protocol_opt = {"name": "dahuaCgi", "value": "DahuaCgi"} if args.protocol == "dahua" \
-        else {"name": "onvif", "value": "Onvif"}
     mode_opt = {"name": args.mode, "value": args.mode.capitalize()}
     req = {
         "inputs": {"name": "CameraFocus"},
         "configs": {
-            "cameraProtocol": _cfg("CameraProtocol", protocol_opt),
             "cameraIp": _cfg("CameraIp", args.camera_ip or ""),
             "cameraUsername": _cfg("CameraUsername", args.camera_user),
             "cameraPassword": _cfg("CameraPassword", args.camera_password or ""),
-            "cameraHttpPort": _cfg("CameraHttpPort", args.http_port),
-            "cameraRtspPort": _cfg("CameraRtspPort", args.rtsp_port),
-            "cameraChannel": _cfg("CameraChannel", args.channel),
+            "cameraHttpPort": _cfg("CameraHttpPort", args.onvif_port),
             "streamSubtype": _cfg("StreamSubtype", {"name": "sub", "value": 1} if args.subtype == "sub"
                                   else {"name": "main", "value": 0}),
             "mode": _cfg("Mode", mode_opt),
@@ -239,10 +234,8 @@ class MockRequest:
 def build_params(args):
     return {
         "inputDetections": None,
-        "CameraProtocol": "DahuaCgi" if args.protocol == "dahua" else "Onvif",
         "CameraIp": args.camera_ip or "", "CameraUsername": args.camera_user,
-        "CameraPassword": args.camera_password or "", "CameraHttpPort": args.http_port,
-        "CameraRtspPort": args.rtsp_port, "CameraChannel": args.channel,
+        "CameraPassword": args.camera_password or "", "CameraHttpPort": args.onvif_port,
         "StreamSubtype": 1 if args.subtype == "sub" else 0,
         "Mode": args.mode.capitalize(),
         "UnderExposedThreshold": args.under, "OverExposedThreshold": args.over,
@@ -251,7 +244,6 @@ def build_params(args):
         "GridOverlay": GRID_MAP[args.grid],
         "FocusMode": args.focus_mode, "FocusValue": args.focus, "ZoomValue": args.zoom,
         "FocusSearchStep": args.focus_step,
-        "TriggerAutofocus": args.trigger_autofocus,
     }
 
 
@@ -264,13 +256,10 @@ def str2bool(value):
 def parse_args():
     p = argparse.ArgumentParser(description="Local runner for the CameraFocus package.")
     p.add_argument("--mode", choices=["brenner", "tenengrad", "stream"], default="tenengrad")
-    p.add_argument("--protocol", choices=["onvif", "dahua"], default="onvif")
     p.add_argument("--camera-ip", default=None)
     p.add_argument("--camera-user", default="admin")
     p.add_argument("--camera-password", default=None)
-    p.add_argument("--http-port", type=int, default=80)
-    p.add_argument("--rtsp-port", type=int, default=554)
-    p.add_argument("--channel", type=int, default=1)
+    p.add_argument("--onvif-port", type=int, default=80)
     p.add_argument("--subtype", choices=["main", "sub"], default="sub")
     p.add_argument("--output", default=None)
     # overlays
@@ -286,7 +275,6 @@ def parse_args():
     p.add_argument("--focus", type=float, default=0.5)
     p.add_argument("--zoom", type=float, default=0.0)
     p.add_argument("--focus-step", type=float, default=0.02)
-    p.add_argument("--trigger-autofocus", type=str2bool, default=False)
     return p.parse_args()
 
 
@@ -321,7 +309,6 @@ def main():
     print("CameraFocus client [{} | {}]".format(
         mode_env, "real-camera" if use_real else "mock-camera"))
     print("  mode     : {}".format(args.mode))
-    print("  protocol : {}".format(args.protocol))
 
     executor.run()
 
