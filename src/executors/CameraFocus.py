@@ -204,18 +204,17 @@ class CameraFocus(Component):
         return False
 
     def _log_closed_loop(self):
-        """Log the search state periodically and whenever it changes phase, so
-        the refocus watchdog can be followed in the container logs."""
+        """Report the search state whenever it changes phase (converged flips or
+        the low-score counter moves), so the autofocus can be followed in the
+        logs without flooding them."""
         state = self.bootstrap.get("af_state") or {}
         converged = state.get("converged")
         best = state.get("best_score")
         ema = state.get("score_ema")
         low = state.get("low_count")
         phase = (converged, low)
-        count = self.bootstrap.get("af_log", 0) + 1
-        self.bootstrap["af_log"] = count
-        if phase == self.bootstrap.get("af_phase") and count % 10 != 1:
-            return
+        if phase == self.bootstrap.get("af_phase"):
+            return  # only report when the search changes phase
         self.bootstrap["af_phase"] = phase
         threshold = (best * state.get("refocus_ratio", 0.88)) if best else None
         _log("closed-loop: score=%.0f ema=%s best=%s refocus_below=%s low=%s converged=%s pos=%s" % (

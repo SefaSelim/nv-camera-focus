@@ -20,11 +20,9 @@ setuptools.setup(
         'novavision.camerafocus',
         'novavision.camerafocus.classes',
         'novavision.camerafocus.configs',
-        'novavision.camerafocus.dataloaders',
         'novavision.camerafocus.executors',
         'novavision.camerafocus.models',
-        'novavision.camerafocus.utils',
-        'novavision.camerafocus.weights'
+        'novavision.camerafocus.utils'
     ],
     package_dir={'novavision.camerafocus': 'src'},
     python_requires=">=3.6"
