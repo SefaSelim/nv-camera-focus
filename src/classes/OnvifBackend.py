@@ -87,7 +87,7 @@ class _SyncService:
 
 
 class OnvifBackend(CameraBackend):
-    def __init__(self, ip, username, password, port=80, subtype=0, timeout=5.0):
+    def __init__(self, ip, username, password, port=80, subtype=1, timeout=5.0):
         self.ip = ip
         self.port = int(port)
         self.subtype = int(subtype)
@@ -124,9 +124,11 @@ class OnvifBackend(CameraBackend):
                 cam = ONVIFCamera(self.ip, self.port, self._username, self._password)
             media = _SyncService(_resolve(cam.create_media_service()))
             profiles = media.GetProfiles()
-            # StreamSubtype selects the media profile: 0 = main (high res),
-            # 1 = sub (lighter, smoother preview). Fall back to the first one.
-            index = self.subtype if 0 <= self.subtype < len(profiles) else 0
+            # StreamSubtype is a 1-based profile number: 1 = main (high res),
+            # 2 = sub (lighter, smoother preview). Fall back to the first one.
+            index = self.subtype - 1
+            if not 0 <= index < len(profiles):
+                index = 0
             profile = profiles[index]
             self._profile_token = profile.token
             try:

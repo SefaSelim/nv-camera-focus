@@ -8,9 +8,9 @@ small Redis-free mock SDK layer.
 
 Usage:
     # offline (synthetic frame, mock camera):
-    python client.py --mode tenengrad
+    python apps/client.py --mode tenengrad
     # real camera over ONVIF:
-    python client.py --camera-ip 10.20.30.139 --camera-password PASS --mode stream \
+    python apps/client.py --camera-ip 10.20.30.139 --camera-password PASS --mode stream \
         --focus-mode Manual --zoom 0.4
 
 If --camera-ip is given the real ONVIF backend is used; otherwise a mock camera
@@ -25,9 +25,10 @@ import types
 
 import numpy as np
 
-REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+# this file lives in <package>/apps/, so the package root is one level up
+PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-GRID_MAP = {"none": 0, "2x2": 2, "3x3": 3, "4x4": 4, "5x5": 5}
+GRID_MAP = {"none": 1, "2x2": 2, "3x3": 3, "4x4": 4, "5x5": 5}
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +43,7 @@ def _register_components_namespace():
         components.__path__ = []
         sys.modules["components"] = components
     camerafocus = types.ModuleType("components.CameraFocus")
-    camerafocus.__path__ = [REPO_ROOT]
+    camerafocus.__path__ = [PACKAGE_ROOT]
     sys.modules["components.CameraFocus"] = camerafocus
     components.CameraFocus = camerafocus
 
@@ -211,8 +212,8 @@ def build_payload(args):
             "cameraUsername": _cfg("CameraUsername", args.camera_user),
             "cameraPassword": _cfg("CameraPassword", args.camera_password or ""),
             "cameraHttpPort": _cfg("CameraHttpPort", args.onvif_port),
-            "streamSubtype": _cfg("StreamSubtype", {"name": "sub", "value": 1} if args.subtype == "sub"
-                                  else {"name": "main", "value": 0}),
+            "streamSubtype": _cfg("StreamSubtype", {"name": "sub", "value": 2} if args.subtype == "sub"
+                                  else {"name": "main", "value": 1}),
             "mode": _cfg("Mode", mode_opt),
         },
     }
@@ -236,7 +237,7 @@ def build_params(args):
         "inputDetections": None,
         "CameraIp": args.camera_ip or "", "CameraUsername": args.camera_user,
         "CameraPassword": args.camera_password or "", "CameraHttpPort": args.onvif_port,
-        "StreamSubtype": 1 if args.subtype == "sub" else 0,
+        "StreamSubtype": 2 if args.subtype == "sub" else 1,
         "Mode": args.mode.capitalize(),
         "UnderExposedThreshold": args.under, "OverExposedThreshold": args.over,
         "ShowZebraWarnings": args.show_zebra, "ShowFocusPeaking": args.show_focus_peaking,

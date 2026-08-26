@@ -58,7 +58,7 @@ class CameraFocus(Component):
         self.camera_user = self._param("CameraUsername", "admin")
         self.camera_pass = self._param("CameraPassword", "")
         self.onvif_port = self._param("CameraHttpPort", 80)
-        self.subtype = self._param("StreamSubtype", 0)
+        self.subtype = self._param("StreamSubtype", 1)
 
         # mode + mode sub-params (present only for the selected mode)
         self.mode = self._param("Mode", "Brenner")

@@ -26,8 +26,8 @@ and the lens focus/zoom).
 - **Camera IP**, **Camera Username**, **Camera Password** (plain text field so it
   is editable; the executor never logs it).
 - **Camera ONVIF Port** (default 80).
-- **Stream Subtype** — selects the ONVIF media profile: **Main** (first profile,
-  high resolution) or **Sub** (second profile, lighter). Use **Sub** for the
+- **Stream Subtype** — selects the ONVIF media profile: **Main** (profile 1,
+  high resolution) or **Sub** (profile 2, lighter). Use **Sub** for the
   smoothest live preview.
 
 The RTSP stream URL is discovered from the camera over ONVIF, so no stream path,
@@ -74,14 +74,14 @@ skipped gracefully.
 
 ## Local test client
 
-`client.py` runs the executor without the platform or Redis.
+`apps/client.py` runs the executor without the platform or Redis.
 
 ```bash
 # offline (synthetic frame, mock camera):
-python client.py --mode tenengrad
+python apps/client.py --mode tenengrad
 
 # real camera over ONVIF:
-python client.py --camera-ip 10.20.30.139 --camera-password PASS \
+python apps/client.py --camera-ip 10.20.30.139 --camera-password PASS \
     --mode stream --focus-mode Manual --zoom 0.4 --focus 0.6
 ```
 
@@ -90,6 +90,11 @@ capabilities), and writes the output image. The password is never printed.
 
 ## Architecture
 
+Package layout follows the NovaVision developer guide: `apps`, `notebooks`,
+`resources`, `tests` and `src` at the top level, with `executors` and `models`
+required under `src`.
+
+- `apps/client.py` — local runner (client) for the package.
 - `src/models/PackageModel.py` — the schema (single `CameraFocus` executor, Mode
   dropdown, shared camera-connection configs).
 - `src/executors/CameraFocus.py` — thin adapter: reads parameters, pulls a frame,

@@ -86,8 +86,10 @@ class OptionEnable(Config):
 
 # Grid overlay options -- value is the number of divisions passed to the renderer
 class GridNone(Config):
+    # 1 division = the whole frame = no grid lines. The value must not be 0:
+    # dropdown option values of 0 are not allowed by the model specification.
     name: Literal["gridNone"] = "gridNone"
-    value: Literal[0] = 0
+    value: Literal[1] = 1
     type: Literal["number"] = "number"
     field: Literal["option"] = "option"
 
@@ -236,7 +238,7 @@ class ShowCenterMarker(Config):
 
 class GridOverlay(Config):
     """
-        Composition grid drawn over the image. None disables the grid, 3x3 is
+        Composition grid drawn over the image. None draws no lines, 3x3 is
         the rule-of-thirds guide, higher values are denser. Affects only the
         overlay, not the focus measurement.
     """
@@ -418,8 +420,10 @@ class CameraHttpPort(Config):
 
 
 class SubtypeMain(Config):
+    # Profile numbers are 1-based: dropdown option values of 0 are not allowed
+    # by the model specification.
     name: Literal["main"] = "main"
-    value: Literal[0] = 0
+    value: Literal[1] = 1
     type: Literal["number"] = "number"
     field: Literal["option"] = "option"
 
@@ -429,7 +433,7 @@ class SubtypeMain(Config):
 
 class SubtypeSub(Config):
     name: Literal["sub"] = "sub"
-    value: Literal[1] = 1
+    value: Literal[2] = 2
     type: Literal["number"] = "number"
     field: Literal["option"] = "option"
 
@@ -439,8 +443,8 @@ class SubtypeSub(Config):
 
 class StreamSubtype(Config):
     """
-        Which ONVIF media profile to pull: Main is the first (high resolution)
-        profile, Sub the second (lower resolution, lighter and smoother for live
+        Which ONVIF media profile to pull: Main is profile 1 (high resolution),
+        Sub is profile 2 (lower resolution, lighter and smoother for live
         preview). Affects only the video, not the focus/zoom control.
     """
     name: Literal["StreamSubtype"] = "StreamSubtype"
@@ -584,6 +588,7 @@ class ConfigExecutor(Config):
     class Config:
         title = "Task"
         json_schema_extra = {
+            "shortDescription": "Select Task",
             "target": "value"
         }
 

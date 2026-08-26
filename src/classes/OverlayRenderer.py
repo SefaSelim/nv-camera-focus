@@ -81,8 +81,8 @@ def draw_center_marker(image):
 
 def draw_grid(image, divisions):
     """Composition grid with `divisions` cells per axis (draws divisions-1 inner
-    lines each way). Draws nothing when divisions is 0."""
-    if divisions <= 0:
+    lines each way). Draws nothing when divisions is 1 or less."""
+    if divisions <= 1:
         return image
     height, width = image.shape[:2]
     color = (128, 128, 128)
@@ -212,13 +212,13 @@ def render(image, gray, focus_matrix, focus_value, options):
     Zero-copy fast path: if no layer is enabled, the input image is returned as
     the same object WITHOUT copying (report Section 04 optimization).
     """
-    divisions = options.get("grid_divisions") or 0
+    divisions = options.get("grid_divisions") or 1
     any_layer = (
         options.get("show_zebra")
         or options.get("show_peaking")
         or options.get("show_center")
         or options.get("show_hud")
-        or divisions > 0
+        or divisions > 1
     )
     if not any_layer:
         return image
@@ -232,7 +232,7 @@ def render(image, gray, focus_matrix, focus_value, options):
         canvas = apply_zebra(canvas, gray, options.get("under"), options.get("over"))
     if options.get("show_center"):
         canvas = draw_center_marker(canvas)
-    if divisions > 0:
+    if divisions > 1:
         canvas = draw_grid(canvas, divisions)
     if options.get("show_hud"):
         canvas = draw_hud(canvas, focus_value, gray, original)
