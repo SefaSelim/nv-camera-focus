@@ -13,22 +13,30 @@ focus position that was commanded on the PREVIOUS step. The search:
   - keeps going while the score improves,
   - reverses and halves the step when the score drops,
   - converges when the step falls below min_step and parks the lens at the best
-    position seen.
+    position seen,
+  - and keeps watching afterwards: if the focus score stays well below the best
+    seen (scene changed, lens defocused), the search restarts automatically.
 Zoom is held fixed (supplied by the caller); only focus is driven.
 """
 
 
 class AutofocusController:
     @staticmethod
-    def initial_state(step=0.02, min_step=0.002):
+    def initial_state(step=0.02, min_step=0.002, refocus_ratio=0.75, refocus_patience=4):
         return {
             "position": None,        # focus position whose score we are evaluating
             "direction": 1,          # +1 or -1
             "step": float(step),
+            "initial_step": float(step),
             "min_step": float(min_step),
             "best_score": None,
             "best_position": None,
             "converged": False,
+            # continuous refocus: once converged, restart the search if the score
+            # stays below refocus_ratio * best for refocus_patience frames
+            "refocus_ratio": float(refocus_ratio),
+            "refocus_patience": int(refocus_patience),
+            "low_count": 0,
         }
 
     @staticmethod
@@ -50,8 +58,28 @@ class AutofocusController:
         if state is None:
             state = AutofocusController.initial_state()
 
-        # Already converged: hold the lens at the best position, do nothing.
+        # Converged: hold position, but keep watching the score so the loop can
+        # refocus by itself when the scene changes or someone defocuses the lens.
         if state.get("converged"):
+            if focus_score is None or focus_score != focus_score:
+                return state
+            best = state.get("best_score")
+            ratio = state.get("refocus_ratio", 0.75)
+            if best and focus_score < best * ratio:
+                state["low_count"] = state.get("low_count", 0) + 1
+                if state["low_count"] >= state.get("refocus_patience", 4):
+                    # sharpness dropped for a while -> search again from here
+                    state.update({
+                        "position": None,
+                        "direction": 1,
+                        "step": state.get("initial_step", state["step"]),
+                        "best_score": None,
+                        "best_position": None,
+                        "converged": False,
+                        "low_count": 0,
+                    })
+            else:
+                state["low_count"] = 0
             return state
 
         # Ignore unusable scores (e.g. NaN) without moving the lens.
