@@ -152,15 +152,18 @@ class CameraFocus(Component):
                 camera.trigger_autofocus()
                 self.bootstrap["one_push_done"] = True
         elif self.focus_mode == "ClosedLoop":
-            # First bring zoom to the requested ZoomValue (exact via AbsoluteMove
-            # where supported); once zoom is at the target, hill-climb focus. If a
-            # focus move later disturbs zoom, re-establish it before focusing.
-            if caps.get("zoom"):
-                status = camera.get_status() or {}
-                current_zoom = status.get("zoom")
-                if current_zoom is None or abs(current_zoom - float(self.zoom_value)) > 0.05:
-                    camera.set_zoom(self.zoom_value)
-                    return  # let zoom settle; focus on a later worker iteration
+            # Apply the zoom target ONCE per change, then always let the focus
+            # loop run. (Re-commanding zoom whenever the reading differs would
+            # block focus forever on a camera that cannot sit exactly on the
+            # requested value.) A zoom move shifts focus on a varifocal lens, so
+            # the focus search is restarted after it.
+            zoom_t = round(float(self.zoom_value), 3)
+            if caps.get("zoom") and self.bootstrap.get("last_zoom") != zoom_t:
+                camera.set_zoom(self.zoom_value)
+                self.bootstrap["last_zoom"] = zoom_t
+                self.bootstrap["af_state"] = AutofocusController.initial_state(
+                    step=self.focus_step)
+                return  # let the lens settle; focus resumes next iteration
             if caps.get("focus"):
                 state = AutofocusController.step(
                     camera, score, self.bootstrap.get("af_state"), None)

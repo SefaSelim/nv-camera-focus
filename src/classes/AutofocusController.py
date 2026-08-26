@@ -38,6 +38,9 @@ class AutofocusController:
             "refocus_ratio": float(refocus_ratio),
             "refocus_patience": int(refocus_patience),
             "low_count": 0,
+            "score_ema": None,       # smoothed score, so frame noise alone
+                                     # cannot trigger a needless refocus
+
         }
 
     @staticmethod
@@ -64,9 +67,14 @@ class AutofocusController:
         if state.get("converged"):
             if focus_score is None or focus_score != focus_score:
                 return state
+            # Smooth the incoming score: the focus measure fluctuates from frame
+            # to frame, and a single dip must not restart the search.
+            ema = state.get("score_ema")
+            ema = focus_score if ema is None else (0.7 * ema + 0.3 * focus_score)
+            state["score_ema"] = ema
             best = state.get("best_score")
             ratio = state.get("refocus_ratio", 0.88)
-            if best and focus_score < best * ratio:
+            if best and ema < best * ratio:
                 state["low_count"] = state.get("low_count", 0) + 1
                 if state["low_count"] >= state.get("refocus_patience", 4):
                     # sharpness dropped for a while -> search again from here
@@ -78,6 +86,7 @@ class AutofocusController:
                         "best_position": None,
                         "converged": False,
                         "low_count": 0,
+                        "score_ema": None,
                     })
             else:
                 state["low_count"] = 0
