@@ -203,6 +203,28 @@ class CameraFocus(Component):
             time.sleep(0.05)
         return False
 
+    def _log_closed_loop(self):
+        """Log the search state periodically and whenever it changes phase, so
+        the refocus watchdog can be followed in the container logs."""
+        state = self.bootstrap.get("af_state") or {}
+        converged = state.get("converged")
+        best = state.get("best_score")
+        ema = state.get("score_ema")
+        low = state.get("low_count")
+        phase = (converged, low)
+        count = self.bootstrap.get("af_log", 0) + 1
+        self.bootstrap["af_log"] = count
+        if phase == self.bootstrap.get("af_phase") and count % 10 != 1:
+            return
+        self.bootstrap["af_phase"] = phase
+        threshold = (best * state.get("refocus_ratio", 0.88)) if best else None
+        _log("closed-loop: score=%.0f ema=%s best=%s refocus_below=%s low=%s converged=%s pos=%s" % (
+            self.bootstrap.get("latest_score", 0.0),
+            "%.0f" % ema if ema else "-",
+            "%.0f" % best if best else "-",
+            "%.0f" % threshold if threshold else "-",
+            low, converged, state.get("position")))
+
     def _camera_worker(self, camera):
         try:
             if self.mode == "Stream":
@@ -213,13 +235,7 @@ class CameraFocus(Component):
                     # frames measured AFTER the move so the hill-climb judges the
                     # new position and not a stale one.
                     self._wait_for_fresh_score()
-                    state = self.bootstrap.get("af_state") or {}
-                    self.bootstrap["af_log"] = self.bootstrap.get("af_log", 0) + 1
-                    if self.bootstrap["af_log"] % 10 == 1:
-                        _log("closed-loop: score=%.0f pos=%s best=%s converged=%s" % (
-                            self.bootstrap.get("latest_score", 0.0),
-                            state.get("position"), state.get("best_score"),
-                            state.get("converged")))
+                    self._log_closed_loop()
             status = camera.get_status() or {}
             self.bootstrap["camera_status_data"] = {
                 "protocol": "Onvif",
