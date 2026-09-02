@@ -243,3 +243,6 @@ fabric.properties
 # End of https://www.toptal.com/developers/gitignore/api/pycharm
 # CameraFocus local client output images
 camerafocus_*.png
+
+# report build artefacts
+resources/report/CameraFocus_DOCUMENTATION.docx
